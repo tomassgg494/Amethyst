@@ -1,0 +1,17 @@
+// Fibonacci starter — compile with:
+//   amethystc fib.amt -o fib && ./fib
+fn fib(n: int) -> int {
+    if n < 2 {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() -> int {
+    var i: int = 0;
+    while i <= 15 {
+        print(fib(i));
+        i = i + 1;
+    }
+    return 0;
+}

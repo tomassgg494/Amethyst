@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# amethyst-new — create a starter Amethyst project for beginners.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: amethyst-new [name] [--force]
+
+Create a starter Amethyst project in the current directory.
+
+  name      project/file base name (default: main)
+  --force   overwrite if the .amt already exists
+
+Examples:
+  amethyst-new            # creates main.amt
+  amethyst-new hello      # creates hello.amt
+  amethyst-new fib        # creates fib.amt (from fib template)
+EOF
+}
+
+name="main"
+force=0
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    --force) force=1 ;;
+    -*) echo "unknown option: $arg" >&2; usage >&2; exit 1 ;;
+    *) name="$arg" ;;
+  esac
+done
+
+# sanitize name (basic identifier-ish)
+if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+  echo "error: invalid project name '$name'" >&2
+  echo "       use letters, digits, _ or - (must start with letter/_)" >&2
+  exit 1
+fi
+
+# Locate templates: installed path first, then relative to this binary
+# (so the package works from a staging root / local extract too).
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+TPL_DIR=""
+for candidate in \
+  "/usr/share/amethyst/templates" \
+  "$script_dir/../share/amethyst/templates" \
+  "$script_dir/../../share/amethyst/templates"
+do
+  if [[ -f "$candidate/hello.amt" ]]; then
+    TPL_DIR="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$TPL_DIR" ]]; then
+  # last resort: walk up from the script looking for packaging/deb/templates (source tree)
+  probe="$script_dir"
+  for _ in 1 2 3 4 5; do
+    if [[ -f "$probe/packaging/deb/templates/hello.amt" ]]; then
+      TPL_DIR="$probe/packaging/deb/templates"
+      break
+    fi
+    probe="$(dirname "$probe")"
+  done
+fi
+
+if [[ -z "$TPL_DIR" || ! -f "$TPL_DIR/hello.amt" ]]; then
+  echo "error: templates not found (is the Amethyst Dev Kit installed?)" >&2
+  echo "       expected /usr/share/amethyst/templates/hello.amt" >&2
+  exit 1
+fi
+
+# choose template: *fib* -> fib, else hello
+template="hello"
+if [[ "$name" == *fib* ]]; then
+  template="fib"
+fi
+src="$TPL_DIR/$template.amt"
+dst="${name}.amt"
+
+if [[ -e "$dst" && $force -eq 0 ]]; then
+  echo "error: '$dst' already exists (use --force to overwrite)" >&2
+  exit 1
+fi
+
+cp "$src" "$dst"
+cat <<EOF
+Created $dst
+
+Next steps:
+  amethystc $dst -o ${name}
+  ./${name}
+
+Or peek at the source:
+  cat $dst
+EOF

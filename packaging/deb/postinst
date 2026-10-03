@@ -1,0 +1,39 @@
+#!/bin/sh
+# postinst — welcome message for Amethyst Dev Kit beginners
+set -e
+
+case "$1" in
+    configure)
+        cat <<'EOF'
+
+  ╔══════════════════════════════════════════════════╗
+  ║           Amethyst Dev Kit installed             ║
+  ╚══════════════════════════════════════════════════╝
+
+  Quick start (no compiler build needed):
+
+    amethyst-new hello          # creates hello.amt
+    amethystc hello.amt -o hello
+    ./hello                     # prints 42
+
+  Examples & templates:
+    ls /usr/share/amethyst/examples
+    ls /usr/share/amethyst/templates
+
+  Docs:
+    man amethystc
+    less /usr/share/doc/amethyst/README.md
+
+  Language site docs live in the web/ folder of the repository.
+
+EOF
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,7 @@
+// Amethyst starter — compile with:
+//   amethystc hello.amt -o hello && ./hello
+fn main() -> int {
+    print(42);
+    print(true);
+    return 0;
+}

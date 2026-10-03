@@ -1,0 +1,72 @@
+.TH AMETHYTHC 1 "September 2026" "Amethyst 1.0.0" "Amethyst Manual"
+.SH NAME
+amethystc \- compile Amethyst programs to native x86-64 binaries
+.SH SYNOPSIS
+.B amethystc
+[\fIoptions\fR] \fIfile.amt\fR
+.SH DESCRIPTION
+.B amethystc
+is the Amethyst Dev Kit compiler. It type-checks a \fI.amt\fR source file,
+emits GNU as x86-64 assembly, assembles it with
+.BR as (1),
+and links a native executable with the system C linker (for libc/\fBprintf\fR
+used by \fBprint\fR).
+.SH OPTIONS
+.TP
+.B \-o \fIpath\fR
+Output path for the executable (default: a.out). With \fB\-S\fR, path of the
+.emitted .s file.
+.TP
+.B \-S
+Emit assembly only; do not assemble or link.
+.TP
+.B \-\-emit\-asm
+Keep intermediate \fI.s\fR and \fI.o\fR files next to the input (debugging).
+.TP
+.B \-h\fR, \fB\-\-help
+Show usage.
+.SH EXAMPLES
+.PP
+Create and run a starter program:
+.PP
+.RS
+.nf
+amethyst-new hello
+amethystc hello.amt -o hello
+./hello
+.fi
+.RE
+.PP
+Inspect generated assembly:
+.PP
+.RS
+.nf
+amethystc -S hello.amt -o hello.s
+.fi
+.RE
+.SH FILES
+.TP
+.I /usr/share/amethyst/examples
+Example Amethyst programs.
+.TP
+.I /usr/share/amethyst/templates
+Templates used by
+.BR amethyst-new (1).
+.TP
+.I /usr/share/doc/amethyst/README.md
+Language overview and reference.
+.SH EXIT STATUS
+.B amethystc
+exits 0 on success, 1 on compile/link errors. Runtime exit status of the
+produced program is the value returned by \fBmain\fR (mod 256).
+.SH DIAGNOSTICS
+Errors use the form
+.IB file : line : col : error: message
+on stderr.
+.SH SEE ALSO
+.BR amethyst-new (1),
+.BR as (1),
+.BR gcc (1),
+.BR ld (1)
+.SH AUTHORS
+Amethyst Project.

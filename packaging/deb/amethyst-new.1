@@ -1,0 +1,33 @@
+.TH AMETHYST-NEW 1 "September 2026" "Amethyst 1.0.0" "Amethyst Manual"
+.SH NAME
+amethyst-new \- create a starter Amethyst project
+.SH SYNOPSIS
+.B amethyst-new
+[\fIname\fR] [\fB\-\-force\fR]
+.SH DESCRIPTION
+Copies a beginner-friendly template into the current directory as
+\fIname.amt\fR (default \fImain.amt\fR). If \fIname\fR contains
+.RB \(lq fib \(rq,
+the Fibonacci template is used; otherwise the hello template.
+.SH OPTIONS
+.TP
+.I name
+Base name for the \fI.amt\fR file (letters, digits, \fB_\fR, \fB-\fR).
+.TP
+.B \-\-force
+Overwrite an existing file.
+.SH EXAMPLES
+.RS
+.nf
+amethyst-new
+amethyst-new hello
+amethyst-new myfib
+.fi
+.RE
+.SH FILES
+.TP
+.I /usr/share/amethyst/templates/hello.amt
+.TP
+.I /usr/share/amethyst/templates/fib.amt
+.SH SEE ALSO
+.BR amethystc (1)
