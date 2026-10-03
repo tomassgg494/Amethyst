@@ -1,0 +1,7 @@
+fn foo(a: int) -> int {
+    return a;
+}
+
+fn main() -> int {
+    return foo(1, 2);
+}

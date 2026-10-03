@@ -1,0 +1,15 @@
+fn main() -> int {
+    print("Hello, Amethyst!");
+    print("string with\ttab and \"quotes\"");
+    print("line1\nline2");
+
+    var n = 7;
+    // strings only work with print; combine via separate prints
+    print("n is:");
+    print(n);
+
+    if n > 0 {
+        print("positive");
+    }
+    return 0;
+}

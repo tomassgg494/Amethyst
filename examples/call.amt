@@ -1,0 +1,8 @@
+fn helper() -> int {
+    return 5;
+}
+
+fn main() -> int {
+    print(helper());
+    return helper();
+}

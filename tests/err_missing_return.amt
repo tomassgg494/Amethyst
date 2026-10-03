@@ -1,0 +1,6 @@
+fn main() -> int {
+    var b: bool = 1 < 2;
+    if b {
+        return 0;
+    }
+}

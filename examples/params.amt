@@ -1,0 +1,17 @@
+fn add7(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> int {
+    return a + b + c + d + e + f + g;
+}
+
+fn mix(flag: bool, n: int) -> bool {
+    if flag && n > 0 {
+        return !flag || n == n;
+    }
+    return flag;
+}
+
+fn main() -> int {
+    print(add7(1, 2, 3, 4, 5, 6, 7));
+    print(mix(true, 3));
+    print(mix(false, 0));
+    return add7(10, 20, 30, 40, 50, 60, 70);
+}

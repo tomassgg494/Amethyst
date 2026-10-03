@@ -1,0 +1,5 @@
+fn main() -> int {
+    var x = 5;
+    print(x[0]);
+    return 0;
+}

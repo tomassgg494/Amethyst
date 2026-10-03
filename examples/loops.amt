@@ -1,0 +1,44 @@
+fn main() -> int {
+    var sum: int = 0;
+
+    for i in 0..10 {
+        sum = sum + i;
+    }
+    print(sum);  // 45
+
+    // break / continue
+    var found: int = -1;
+    for i in 1..100 {
+        if i % 7 == 0 {
+            found = i;
+            break;
+        }
+    }
+    print(found);  // 7
+
+    var evens: int = 0;
+    for i in 0..10 {
+        if i % 2 != 0 {
+            continue;
+        }
+        evens = evens + 1;
+    }
+    print(evens);  // 5
+
+    // while + break/continue
+    var n: int = 0;
+    var hits: int = 0;
+    while true {
+        n = n + 1;
+        if n > 20 {
+            break;
+        }
+        if n % 3 != 0 {
+            continue;
+        }
+        hits = hits + 1;
+    }
+    print(n);    // 21
+    print(hits); // 6  (3,6,9,12,15,18)
+    return 0;
+}

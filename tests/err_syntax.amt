@@ -1,0 +1,4 @@
+fn main() -> int {
+    var x: int = 1
+    return x;
+}
