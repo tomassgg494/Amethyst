@@ -5,7 +5,9 @@
 - **Compiled**, not interpreted.
 - Compiler written in **C++17** (no LLVM).
 - Emits **x86-64 GAS assembly**, assembled with `as`, linked with the system linker (`ld` via `gcc` driver).
-- Static typing: `int` (64-bit), `float` (64-bit IEEE 754), `bool`, `string`, `void` (return type only).
+- Static typing: `int` (64-bit), `float` (64-bit IEEE 754), `bool`, `string`,
+  structs, arrays (fixed-size on the stack, heap via `new`), `void` (return
+  type only).
 
 **Website & docs:** https://tomassgg494.github.io/Amethyst-site/
 (source: [`tomassgg494/Amethyst-site`](https://github.com/tomassgg494/Amethyst-site))
@@ -111,23 +113,63 @@ fn main() -> int {
 }
 ```
 
+Structs and heap arrays:
+
+```amethyst
+struct Point {
+    x: int,
+    y: float,
+    label: string
+}
+
+fn move(p: Point, dx: int) -> void {
+    p.x += dx;          // fields are written through the reference
+}
+
+fn main() -> int {
+    var p = new Point { label: "centro", y: 2.5, x: 10 };  // any field order
+    move(p, 5);
+    print(p.x);                      // 15
+
+    var ps: Point[3] = [p, new Point { x: 1, y: 0.0, label: "a" }, null];
+    print(len(ps));                  // 3
+    print(ps[2] == null);            // 1
+
+    var buf = new int[4];            // 4 zeroed elements on the heap
+    buf[0] = 7;
+    print(buf[0]);                   // 7
+
+    free(ps[1]);                     // free every heap object exactly once
+    free(p);                         // the variable becomes null
+    free(buf);                       // a `new` array is freed whole
+    print(p == null);                // 1
+    return 0;
+}
+```
+
 ### Declarations
 
 | Form | Meaning |
 |------|---------|
-| `fn name(a: int, b: bool) -> int { ... }` | Function (up to 6 register slots — an array parameter uses 2; the rest are passed on the stack) |
+| `fn name(a: int, b: bool) -> int { ... }` | Function (up to 6 register slots — an array parameter uses 2, a struct 1; the rest are passed on the stack) |
+| `struct P { x: int, y: float }` | Struct declaration: comma-separated `name: type` fields. Types may be used before they are declared, so `struct Node { next: Node }` works |
 | `var x: int = expr;` | Local variable, initialized at the declaration |
 | `var x: int;` | Local variable left unassigned until the first `x = expr` |
 | `var x = expr;` | Type inference from initializer (an initializer is required when the type is omitted) |
-| `var a: int[10] = [1, 2, ...];` | Fixed-size array (element type `int` or `bool`) |
-| `fn f(a: int[])` | Array parameter: `int[]` / `bool[]`, passed as pointer + length |
+| `var a: int[10] = [1, 2, ...];` | Fixed-size stack array; the element type may be `int`, `bool`, `float`, `string` or a struct |
+| `var a: int[] = new int[n];` | Heap array: `n` is any `int` expression, evaluated once; the block starts zeroed and `a` carries pointer + length |
+| `fn f(a: int[])` | Array parameter: `int[]` / `float[]` / `Point[]`, passed as pointer + length |
 | `fn f(a: string)` | String parameter: pointer to NUL-terminated text |
 | `var s: string = "hi";` | String variable (no concatenation, no indexing) |
 | `var x: float = 1.5;` | Floating-point variable (64-bit binary64) |
-| `x = expr;` | Assignment |
-| `x += expr;` | Compound assignment: `+=` `-=` `*=` `/=` `%=` (also on `a[i]`) |
+| `var p = new P { x: 1, y: 2 };` | Heap object; every field exactly once, in any order. The variable holds a reference (one machine word) |
+| `var p: P = null;` | Struct variable without an object yet; `null` only fits struct types |
+| `x = expr;` | Assignment; the target is any lvalue: a variable, `a[i]` or `p.x` |
+| `x += expr;` | Compound assignment: `+=` `-=` `*=` `/=` `%=` (also on `a[i]` and `p.x`) |
 | `a[i] = expr;` | Array element assignment |
+| `p.x = expr;` | Struct field assignment |
 | `print(expr);` | Print `int`, `bool`, `float` or `string` |
+| `free(p);` | Release a heap object or a `new` array and null the variable; a second `free` is a no-op |
 
 Entry point: `fn main() -> int` (no parameters).
 
@@ -147,9 +189,19 @@ Entry point: `fn main() -> int` (no parameters).
   (`0..10` is still a range, not a float). Division by zero yields `inf` /
   `NaN` as IEEE-754 specifies — it does not trap — and every comparison with
   `NaN` is false except `!=`, which is true.
-- `int[N]` / `bool[N]` — fixed-size stack arrays (bounds-checked at runtime)
-- `int[]` / `bool[]` — array parameter type: pointer + length; it aliases the
-  caller's array, so the callee can write through it, and `len()` works on it
+- `T[N]` — fixed-size stack array of N elements (T is `int`, `bool`,
+  `float`, `string` or a struct); bounds-checked at runtime. Nothing to
+  free: only the elements that are themselves heap objects need `free`.
+- `T[]` — slice type: pointer + length. As a parameter it aliases the
+  caller's array, so the callee can write through it and `len()` works on
+  it; as a local it is written `var a: T[] = new T[n];` and holds a heap
+  block of `n` zeroed elements.
+- `P` (a struct name) — a reference to a heap object with the fields of
+  `struct P`. Assigning or passing one copies the reference, so two
+  variables can name the same object; there is no value-copy and no
+  deep equality — compare with `== null` only.
+- `null` — the reference to no object; it fits in struct-typed slots and
+  nowhere else. Reading a field of `null` fails at runtime.
 - `string` — NUL-terminated text in `.rodata`; store it in variables, assign,
   compare with `==` / `!=` (compares contents, not pointers), pass it to and
   return it from functions. There is no concatenation, indexing or ordering.
@@ -159,13 +211,17 @@ No implicit conversions: `int`, `bool`, `float` and `string` never mix on
 their own — write `float(n)` or `int(x)` to move between the two numeric
 types. `%` is `int`-only.
 
+There is no garbage collector: every `new` needs exactly one `free`.
+Freeing an object does not stop other variables that still refer to it —
+they become dangling and must not be used again.
+
 ### Statements
 
 `var` (with optional inference), assignment, compound assignment
-(`+=` `-=` `*=` `/=` `%=`), array element assignment,
-`if` / `else if` / `else`, `while`, `for i in a..b` (half-open range),
-`break`, `continue`, `return`, `print`, nested `{ }` blocks, expression
-statements.
+(`+=` `-=` `*=` `/=` `%=`), array element assignment, struct field
+assignment, `if` / `else if` / `else`, `while`, `for i in a..b` (half-open
+range), `break`, `continue`, `return`, `print`, `free`, nested `{ }`
+blocks, expression statements.
 
 Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 `break` / `continue` only inside a loop.
@@ -179,10 +235,12 @@ Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 5. `+` `-`
 6. `*` `/` `%`
 7. unary `-` `!`
-8. literals, `ident`, `a[i]`, `call(...)`, `[...]`, `( ... )`
+8. literals, `ident`, `a[i]`, `p.x`, `call(...)`, `[...]`,
+   `new P { ... }`, `new T[n]`, `( ... )`
 
-`==` / `!=` work on `int`, `bool`, `float` and `string`; `<` `<=` `>` `>=`
-and `+` `-` `*` `/` work on two `int`s or two `float`s (never mixed).
+`==` / `!=` work on `int`, `bool`, `float` and `string`, and on any struct
+against `null` (two structs are not comparable); `<` `<=` `>` `>=` and
+`+` `-` `*` `/` work on two `int`s or two `float`s (never mixed).
 
 ### Comments
 
@@ -198,10 +256,13 @@ and `+` `-` `*` `/` work on two `int`s or two `float`s (never mixed).
                    → as → .o → gcc -no-pie (ld + crt + libc) → executable
 ```
 
-- Locals live in the stack frame (`-8(%rbp)`, `-16(%rbp)`, …).
+- Locals live in the stack frame (`-8(%rbp)`, `-16(%rbp)`, …). Structs and
+  `new` arrays live on the heap: `malloc` for `new P { ... }`, `calloc(n, 8)`
+  for `new T[n]` (so new elements are zero), `free` for `free(...)`.
 - Register args: `rdi rsi rdx rcx r8 r9` (an array parameter occupies two of
   them) and `xmm0`-`xmm7` for `float`s; further args on the stack (copied into
-  the frame on entry).
+  the frame on entry). A struct is one machine word, so it uses one integer
+  register and the ABI is unchanged.
 - `print` lowers to `puts` for strings, `printf("%.15g\n", ...)` for floats and
   `printf("%ld\n", ...)` for `int` / `bool`.
 
@@ -220,13 +281,24 @@ Array variables and type-inferred declarations always need an initializer.
 
 Array out-of-bounds access is caught at runtime: prints
 `Amethyst runtime error: index N out of bounds for array of size M` and exits 1.
+Reading the array after `free(a)` fails the same check, because the length
+was reset to 0.
 
 Division or modulo by zero prints
 `Amethyst runtime error: division by zero` and exits 1.
 
-## Roadmap (not in v1.1)
+Reading a field of `null` prints
+`Amethyst runtime error: null reference (field 'x' at line N)` and exits 1.
 
-Pointers, structs, heap allocation, modules, optimizations.
+`new T[n]` with `n <= 0` prints
+`Amethyst runtime error: array size must be positive (got N)` and exits 1;
+a failed allocation prints `Amethyst runtime error: out of memory` and
+exits 1.
+
+## Roadmap (not in v1.2)
+
+Address-of / dereference (`&`, `*`), value structs, methods, modules, a
+tracing garbage collector, optimizations.
 
 ## Project layout
 
