@@ -204,24 +204,27 @@ StmtPtr Parser::parseVarDecl() {
 
     if (match(TokenType::Colon)) {
         ty = parseType(false);
-        // array suffix: int[10] / bool[4] / float[3] / Point[5]
+        // array suffix: int[10] / bool[4] / float[3] / Point[5], or int[] for
+        // a heap array (`var a: int[] = new int[10];` — checked by sema)
         if (check(TokenType::LBracket)) {
             advance();
             if (check(TokenType::RBracket)) {
-                fail("local arrays need a fixed size, e.g. 'int[10]' "
-                     "(slices are only parameter types)");
+                expect(TokenType::RBracket, "']' after '['");
+                ty = Type::arrayOf(ty);
+                size = 0;
+            } else {
+                const Token& sizeTok = expect(TokenType::IntLit, "array size");
+                long long n = std::strtoll(sizeTok.text.c_str(), nullptr, 10);
+                if (n <= 0 || n > 10000000) {
+                    failAt(sizeTok, "array size must be between 1 and 10000000");
+                }
+                expect(TokenType::RBracket, "']' after array size");
+                if (ty == Type::Void) {
+                    fail("arrays cannot hold void values");
+                }
+                ty = Type::arrayOf(ty);
+                size = static_cast<int>(n);
             }
-            const Token& sizeTok = expect(TokenType::IntLit, "array size");
-            long long n = std::strtoll(sizeTok.text.c_str(), nullptr, 10);
-            if (n <= 0 || n > 10000000) {
-                failAt(sizeTok, "array size must be between 1 and 10000000");
-            }
-            expect(TokenType::RBracket, "']' after array size");
-            if (ty == Type::Void) {
-                fail("arrays cannot hold void values");
-            }
-            ty = Type::arrayOf(ty);
-            size = static_cast<int>(n);
         }
     } else {
         inferred = true;
@@ -460,10 +463,24 @@ ExprPtr Parser::parsePostfix() {
 ExprPtr Parser::parseNew() {
     const Token& kw = expect(TokenType::KwNew, "'new'");
     Type ty = parseType(false);
+
+    // heap array: `new int[n]` / `new Point[count]`
+    if (check(TokenType::LBracket)) {
+        advance();
+        if (ty == Type::Void) {
+            failAt(kw, "'new' cannot allocate void values");
+        }
+        ExprPtr count = parseExpression();
+        expect(TokenType::RBracket, "']' after the array size");
+        return Expr::makeNewArray(Type::arrayOf(ty), std::move(count), kw.line,
+                                  kw.col);
+    }
+
     if (ty.kind != Type::Kind::Struct) {
-        failAt(kw, std::string("cannot allocate a value of type '") +
-                       typeName(ty, prog_->structs) +
-                       "' with 'new' (only struct types can be created with 'new')");
+        const std::string scalar = typeName(ty, prog_->structs);
+        failAt(kw, std::string("cannot allocate a value of type '") + scalar +
+                       "' with 'new' (use 'new " + scalar +
+                       "[n]' for an array, or a struct type)");
     }
     const std::string tyName = typeName(ty, prog_->structs);
     expect(TokenType::LBrace, "'{' after 'new " + tyName + "'");

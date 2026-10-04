@@ -154,8 +154,10 @@ struct Expr {
 
     // Unary: lhs; Binary: lhs, rhs; Call: args;
     // ArrayLit: args (elements); Index: lhs (array), rhs (index expr);
-    // Field: lhs (object), name (field); New: args (field values) with
-    // fieldNames parallel to them (declaration order after sema).
+    // Field: lhs (object), name (field);
+    // New: struct → args (values) with fieldNames parallel to them, in
+    //      declaration order after sema; array → lhs is the element count
+    //      and type.kind == Kind::Array tells the two apart
     ExprPtr lhs;
     ExprPtr rhs;
     std::vector<ExprPtr> args;
@@ -245,6 +247,15 @@ struct Expr {
         e->kind = ExprKind::New;
         e->type = type;
         e->args = std::move(fields);
+        e->line = line;
+        e->col = col;
+        return e;
+    }
+    static ExprPtr makeNewArray(Type type, ExprPtr count, int line, int col) {
+        auto e = std::make_unique<Expr>();
+        e->kind = ExprKind::New;
+        e->type = type;
+        e->lhs = std::move(count);
         e->line = line;
         e->col = col;
         return e;

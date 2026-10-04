@@ -1,0 +1,39 @@
+// heap arrays: `new T[n]` allocates n zeroed elements on the heap.
+// The variable holds {pointer, length} like a slice, and `free(a)` releases
+// the block and leaves the length at 0.
+
+fn sum(a: int[]) -> int {
+    var total = 0;
+    for i in 0..len(a) {
+        total += a[i];
+    }
+    return total;
+}
+
+fn main() -> int {
+    var n = 8;
+    var a = new int[n];     // n may be any int expression
+    print(len(a));          // 8
+    print(a[0]);            // 0 (calloc zeroes the block)
+
+    var i = 0;
+    while (i < n) {
+        a[i] = i * i;
+        i += 1;
+    }
+    print(a[7]);            // 49
+    print(sum(a));          // 0+1+4+9+16+25+36+49 = 140
+
+    // fixed-size locals and heap arrays are different declarations:
+    // `int[3]` lives in the frame, `int[] = new int[3]` on the heap
+    var fixed: float[2] = [1.5, 2.5];
+    var heap: float[] = new float[3];
+    heap[0] = fixed[1];
+    print(heap[0]);         // 2.5
+    print(heap[2]);         // 0
+
+    free(a);
+    free(heap);
+    print(len(a));          // 0
+    return 0;
+}

@@ -280,8 +280,13 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 break;
             }
             Type initType = checkExpr(*stmt.expr);
+            // `new T[n]` yields a slice; an array literal yields a fixed array
+            bool fromNew =
+                stmt.expr->kind == ExprKind::New &&
+                initType.kind == Type::Kind::Array;
 
-            if (isArrayType(initType) && stmt.expr->kind != ExprKind::ArrayLit) {
+            if (isArrayType(initType) && stmt.expr->kind != ExprKind::ArrayLit &&
+                !fromNew) {
                 fail("array variable '" + stmt.name +
                          "' must be initialized with an array literal "
                          "(copy elements one by one)",
@@ -307,7 +312,22 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                              tyName(initType) + "'",
                          stmt.line, stmt.col);
                 }
-                if (stmt.expr->arraySize != stmt.declaredSize) {
+                if (fromNew) {
+                    if (stmt.declaredSize > 0) {
+                        fail(std::string("cannot initialize the fixed-size '") +
+                                 fixedArrayName(stmt.declaredType.element(),
+                                                stmt.declaredSize) +
+                                 " " + stmt.name +
+                                 "' with 'new' (declare it as '" +
+                                 tyName(stmt.declaredType) + "')",
+                             stmt.line, stmt.col);
+                    }
+                    stmt.declaredSize = -1;  // length is a runtime value
+                } else if (stmt.declaredSize <= 0) {
+                    fail("local slices must be initialized with 'new' "
+                         "(array literals need a fixed size, e.g. 'int[3]')",
+                         stmt.line, stmt.col);
+                } else if (stmt.expr->arraySize != stmt.declaredSize) {
                     fail(std::string("array size mismatch: '") + stmt.name + "' is " +
                              std::to_string(stmt.declaredSize) + " long, initializer has " +
                              std::to_string(stmt.expr->arraySize) + " elements",
@@ -329,12 +349,15 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 }
             }
 
-            VarInfo info{stmt.declaredType, -1,
-                         isArrayType(stmt.declaredType) ? stmt.declaredSize : 0};
+            VarInfo info{stmt.declaredType, -1, 0};
             info.assigned = true;
             if (isArrayType(stmt.declaredType)) {
+                // a slice (fixed size ≤ 0) is {pointer, length}: two slots
+                bool slice = stmt.declaredSize <= 0;
                 info.slot = nextSlot_;
-                nextSlot_ += stmt.declaredSize;
+                info.arraySize = slice ? -1 : stmt.declaredSize;
+                info.heapArray = fromNew;
+                nextSlot_ += slice ? 2 : stmt.declaredSize;
             } else {
                 info.slot = nextSlot_++;
             }
@@ -444,9 +467,24 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                      stmt.line, stmt.col);
             }
             Type t = checkExpr(*stmt.target);
+            if (t.kind == Type::Kind::Array) {
+                // Only what this frame allocated can be released: a slice
+                // parameter may point into the caller's stack array.
+                bool heap = false;
+                if (stmt.target->kind == ExprKind::Ident) {
+                    VarInfo* v = lookup(stmt.target->name);
+                    heap = v != nullptr && v->heapArray;
+                }
+                if (!heap) {
+                    fail("only an array variable initialized with 'new' in "
+                         "this function can be freed",
+                         stmt.line, stmt.col);
+                }
+                break;
+            }
             if (t.kind != Type::Kind::Struct) {
                 fail(std::string("cannot free a value of type '") + tyName(t) +
-                         "' (only structs can be freed)",
+                         "' (only structs and 'new' arrays can be freed)",
                      stmt.line, stmt.col);
             }
             break;
@@ -734,8 +772,21 @@ Type Sema::checkField(Expr& expr) {
 }
 
 Type Sema::checkNew(Expr& expr) {
+    if (expr.type.kind == Type::Kind::Array) {
+        // `new T[count]`: the length is a runtime value kept next to the
+        // pointer, exactly like a slice parameter
+        Type count = checkExpr(*expr.lhs);
+        if (count != Type::Int) {
+            fail(std::string("array size must be int, got '") + tyName(count) +
+                     "'",
+                 expr.lhs->line, expr.lhs->col);
+        }
+        expr.arraySize = -1;
+        return expr.type;
+    }
     if (expr.type.kind != Type::Kind::Struct) {
-        fail("only struct types can be created with 'new'", expr.line, expr.col);
+        fail("only struct types and arrays can be created with 'new'",
+             expr.line, expr.col);
     }
     const StructDecl& sd = program_->structs[expr.type.id];
 

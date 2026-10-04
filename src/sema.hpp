@@ -39,12 +39,13 @@ private:
     struct VarInfo {
         Type type;
         int slot;
-        int arraySize = 0;  // for array vars
+        int arraySize = 0;  // for array vars: element count, -1 for a slice
         int declLine = 0;
         int declCol = 0;
         bool used = false;   // referenced after declaration (read or assigned)
         bool isParam = false;
         bool assigned = false;  // definitely assigned before any read
+        bool heapArray = false;  // created with `new` in this function
     };
 
     struct Scope {

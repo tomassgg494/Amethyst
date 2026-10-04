@@ -23,6 +23,7 @@ private:
     void emitArrayBase(const Expr& arr, const std::string& reg);
     void emitArrayLength(const Expr& arr);        // result in %rax
     void emitAddr(const Expr& lvalue);            // address of an lvalue → %rax
+    void emitNewArray(const Expr& expr, int slot);  // `new T[n]` → {ptr, len}
     void emitNullCheck(int line, const std::string& what);  // ptr in %rax
     void emitDivGuard();                          // %rcx is the divisor; aborts if 0
     void emitIntOp(TokenType op);                 // lhs %rax, rhs %rcx → result %rax

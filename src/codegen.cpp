@@ -45,6 +45,8 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    .string \"Amethyst runtime error: null reference (%s at line %ld)\\n\"\n";
     out_ += ".fmt_oom:\n";
     out_ += "    .string \"Amethyst runtime error: out of memory\\n\"\n";
+    out_ += ".fmt_size:\n";
+    out_ += "    .string \"Amethyst runtime error: array size must be positive (got %ld)\\n\"\n";
     out_ += ".text\n";
 
     // shared bounds-failure handler (never returns)
@@ -99,6 +101,20 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    movl $1, %edi\n";
     out_ += "    call exit@PLT\n";
     out_ += ".size __amethyst_oom_fail, .-__amethyst_oom_fail\n";
+
+    // shared negative-size handler for `new T[n]` (never returns)
+    // entry: %rdi = requested element count
+    out_ += ".globl __amethyst_size_fail\n";
+    out_ += ".type __amethyst_size_fail, @function\n";
+    out_ += "__amethyst_size_fail:\n";
+    out_ += "    subq $8, %rsp\n";            // entry rsp ≡ 8 (mod 16) → align for printf
+    out_ += "    movq %rdi, %rsi\n";          // rsi = size
+    out_ += "    leaq .fmt_size(%rip), %rdi\n";
+    out_ += "    xorl %eax, %eax\n";
+    out_ += "    call printf@PLT\n";
+    out_ += "    movl $1, %edi\n";
+    out_ += "    call exit@PLT\n";
+    out_ += ".size __amethyst_size_fail, .-__amethyst_size_fail\n";
 
     for (const auto& fn : program.functions) {
         emitFunction(fn, program);
@@ -283,6 +299,42 @@ void Codegen::emitAddr(const Expr& lvalue) {
     }
 }
 
+void Codegen::emitNewArray(const Expr& expr, int slot) {
+    // `new T[n]`: zeroed with calloc, stored like a slice — pointer in
+    // `slot`, element count in `slot + 1`, and element 0 at the highest
+    // address so that element i lives at base - 8*i (as everywhere else)
+    emitExpr(*expr.lhs);  // count → %rax
+
+    std::string sizeOk = newLabel("size_ok");
+    out_ += "    cmpq $0, %rax\n";
+    out_ += "    jg " + sizeOk + "\n";
+    out_ += "    movq %rax, %rdi\n";  // the offending size
+    emitAlignedCall("__amethyst_size_fail");
+    out_ += sizeOk + ":\n";
+
+    out_ += "    movq %rax, %rdi\n";  // nmemb
+    out_ += "    movq $8, %rsi\n";    // size of one element
+    out_ += "    pushq %rax\n";       // keep the count across the call
+    stackDepth_++;
+    emitAlignedCall("calloc");
+
+    std::string allocOk = newLabel("alloc_ok");
+    out_ += "    testq %rax, %rax\n";
+    out_ += "    jne " + allocOk + "\n";
+    emitAlignedCall("__amethyst_oom_fail");
+    out_ += allocOk + ":\n";
+
+    out_ += "    movq %rax, %r11\n";  // raw block
+    out_ += "    popq %rax\n";        // count
+    stackDepth_--;
+    out_ += "    movq %rax, " +
+            std::to_string(slotOffset(slot + 1)) + "(%rbp)\n";  // length
+    out_ += "    shlq $3, %rax\n";
+    out_ += "    addq %rax, %r11\n";
+    out_ += "    subq $8, %r11\n";  // base = raw + 8*(count - 1)
+    out_ += "    movq %r11, " + std::to_string(slotOffset(slot)) + "(%rbp)\n";
+}
+
 void Codegen::emitNullCheck(int line, const std::string& what) {
     // pointer in %rax
     std::string okL = newLabel("not_null");
@@ -391,12 +443,18 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
 
         case StmtKind::VarDecl: {
             if (isArrayType(stmt.declaredType)) {
-                // store each element into consecutive slots
-                for (size_t i = 0; i < stmt.expr->args.size(); ++i) {
-                    emitExpr(*stmt.expr->args[i]);
-                    out_ += "    movq %rax, " +
-                            std::to_string(slotOffset(stmt.slot + static_cast<int>(i))) +
-                            "(%rbp)\n";
+                if (stmt.expr->kind == ExprKind::New) {
+                    // heap array: {pointer, length} in two slots
+                    emitNewArray(*stmt.expr, stmt.slot);
+                } else {
+                    // store each element into consecutive slots
+                    for (size_t i = 0; i < stmt.expr->args.size(); ++i) {
+                        emitExpr(*stmt.expr->args[i]);
+                        out_ += "    movq %rax, " +
+                                std::to_string(
+                                    slotOffset(stmt.slot + static_cast<int>(i))) +
+                                "(%rbp)\n";
+                    }
                 }
             } else if (stmt.expr) {
                 emitExpr(*stmt.expr);
@@ -447,6 +505,27 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
             emitAddr(*stmt.target);  // %rax = &lvalue
             out_ += "    pushq %rax\n";
             stackDepth_++;
+
+            if (stmt.target->type.kind == Type::Kind::Array) {
+                // the block starts below the base: raw = base - 8*(len-1);
+                // a null pointer (already freed) is a no-op
+                std::string skipL = newLabel("free_skip");
+                out_ += "    movq (%rax), %rdi\n";
+                out_ += "    testq %rdi, %rdi\n";
+                out_ += "    je " + skipL + "\n";
+                out_ += "    movq -8(%rax), %rcx\n";  // length
+                out_ += "    shlq $3, %rcx\n";
+                out_ += "    subq %rcx, %rdi\n";
+                out_ += "    addq $8, %rdi\n";  // raw block
+                emitAlignedCall("free");
+                out_ += skipL + ":\n";
+                out_ += "    popq %rax\n";
+                stackDepth_--;
+                out_ += "    movq $0, (%rax)\n";    // pointer = null
+                out_ += "    movq $0, -8(%rax)\n";  // length = 0
+                break;
+            }
+
             out_ += "    movq (%rax), %rdi\n";
             emitAlignedCall("free");
             out_ += "    popq %rax\n";
@@ -632,6 +711,12 @@ void Codegen::emitExpr(const Expr& expr) {
             break;
 
         case ExprKind::New: {
+            if (expr.type.kind == Type::Kind::Array) {
+                // sema only accepts `new T[n]` as a variable initializer,
+                // which is emitted by emitNewArray
+                out_ += "    # array 'new' outside a declaration\n";
+                break;
+            }
             // a struct is one heap block, one 8-byte slot per field
             const StructDecl& sd = program_->structs[expr.type.id];
             int bytes = sd.sizeBytes;

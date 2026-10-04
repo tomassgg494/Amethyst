@@ -1,0 +1,4 @@
+fn main() -> int {
+    var a: int[3] = new int[3];
+    return 0;
+}

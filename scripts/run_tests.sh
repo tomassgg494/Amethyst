@@ -302,6 +302,22 @@ centro
 check "structs output" "$expected_structs" "$out"
 check "structs exit" "0" "$rc"
 
+# heap arrays: new T[n] with a runtime length, zeroed, free()
+$BIN -o build/heap examples/heap.amt
+set +e
+out=$(./build/heap)
+rc=$?
+set -e
+expected_heap="8
+0
+49
+140
+2.5
+0
+0"
+check "heap output" "$expected_heap" "$out"
+check "heap exit" "0" "$rc"
+
 # slice ABI: >6 integer args, and a slice mixed with scalars
 cat > build/abi.amt <<'EOF'
 fn seven(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> int {
@@ -533,6 +549,29 @@ else
   echo "        err: $err"
 fi
 
+# `new T[n]` with a non-positive size → exit 1 + message
+cat > build/badsize.amt <<'EOF'
+fn main() -> int {
+    var n = 0;
+    var a = new int[n];
+    print(len(a));
+    return 0;
+}
+EOF
+$BIN -o build/badsize build/badsize.amt
+set +e
+err=$(./build/badsize 2>&1)
+rc=$?
+set -e
+if [[ $rc -eq 1 && "$err" == *"array size must be positive (got 0)"* ]]; then
+  PASS=$((PASS + 1))
+  echo "  PASS  runtime heap array size"
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL  runtime heap array size (rc=$rc)"
+  echo "        err: $err"
+fi
+
 echo "== error cases =="
 
 expect_fail() {
@@ -576,7 +615,7 @@ expect_fail "len redefinition" tests/err_len_redef.amt "'len' is a builtin and c
 expect_fail "array literal argument" tests/err_array_arg_literal.amt "must be a variable (assign the array first)"
 expect_fail "slice element type" tests/err_slice_elem_type.amt "expected 'bool[]', got 'int[]'"
 expect_fail "sized array parameter" tests/err_param_array_size.amt "array parameters must be written as a slice"
-expect_fail "slice local variable" tests/err_slice_local.amt "local arrays need a fixed size"
+expect_fail "slice local variable" tests/err_slice_local.amt "local slices must be initialized with 'new'"
 expect_fail "array copy" tests/err_array_copy.amt "must be initialized with an array literal"
 expect_fail "float + int" tests/err_float_int_mix.amt "operator expects two floats, got 'float' and 'int'"
 expect_fail "float modulo" tests/err_float_mod.amt "'%' has no float version"
@@ -604,6 +643,11 @@ expect_fail "field of unassigned struct" tests/err_struct_uninit.amt "variable '
 expect_fail "struct array element type" tests/err_struct_elem_type.amt "array element 2 has type 'int', expected 'Point'"
 expect_fail "null array element" tests/err_null_array.amt "array elements cannot be 'null'"
 expect_fail "void array element" tests/err_void_array.amt "array elements must have a value"
+expect_fail "new into fixed array" tests/err_heap_fixed.amt "cannot initialize the fixed-size 'int[3] a' with 'new'"
+expect_fail "free a local array" tests/err_heap_free_local.amt "only an array variable initialized with 'new'"
+expect_fail "free an array parameter" tests/err_heap_free_param.amt "only an array variable initialized with 'new'"
+expect_fail "array size type" tests/err_heap_size_type.amt "array size must be int, got 'string'"
+expect_fail "new as a statement" tests/err_heap_new_stmt.amt "arrays cannot be used in this context"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

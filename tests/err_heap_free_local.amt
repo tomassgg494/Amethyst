@@ -1,0 +1,5 @@
+fn main() -> int {
+    var v: int[3] = [1, 2, 3];
+    free(v);
+    return 0;
+}

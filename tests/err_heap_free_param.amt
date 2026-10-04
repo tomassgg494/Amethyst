@@ -1,0 +1,9 @@
+fn take(a: int[]) -> int {
+    free(a);
+    return 0;
+}
+
+fn main() -> int {
+    var v: int[3] = [1, 2, 3];
+    return take(v);
+}
