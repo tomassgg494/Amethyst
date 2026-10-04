@@ -1,0 +1,9 @@
+fn count(flags: bool[]) -> int {
+    return len(flags);
+}
+
+fn main() -> int {
+    var nums: int[2] = [1, 2];
+    print(count(nums));
+    return 0;
+}

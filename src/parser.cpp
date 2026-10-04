@@ -43,11 +43,28 @@ const Token& Parser::expect(TokenType type, const std::string& what) {
     fail("expected " + what + ", got " + got);
 }
 
-Type Parser::parseType(bool allowVoid) {
-    if (match(TokenType::KwInt)) return Type::Int;
-    if (match(TokenType::KwBool)) return Type::Bool;
-    if (allowVoid && match(TokenType::KwVoid)) return Type::Void;
-    fail("expected type (int, bool" + std::string(allowVoid ? ", void" : "") + ")");
+Type Parser::parseType(bool allowVoid, bool allowSlice) {
+    Type base = Type::Error;
+    if (match(TokenType::KwInt)) {
+        base = Type::Int;
+    } else if (match(TokenType::KwBool)) {
+        base = Type::Bool;
+    } else if (allowVoid && match(TokenType::KwVoid)) {
+        return Type::Void;
+    } else {
+        fail("expected type (int, bool" + std::string(allowVoid ? ", void" : "") + ")");
+    }
+
+    // slice parameter type: int[] / bool[]
+    if (allowSlice && match(TokenType::LBracket)) {
+        if (check(TokenType::IntLit)) {
+            fail("array parameters must be written as 'int[]' or 'bool[]' "
+                 "(the length is not part of the type)");
+        }
+        expect(TokenType::RBracket, "']' after '['");
+        return base == Type::Bool ? Type::ArrayBool : Type::ArrayInt;
+    }
+    return base;
 }
 
 std::vector<Param> Parser::parseParams() {
@@ -59,7 +76,7 @@ std::vector<Param> Parser::parseParams() {
     do {
         const Token& nameTok = expect(TokenType::Ident, "parameter name");
         expect(TokenType::Colon, "':' after parameter name");
-        Type ty = parseType(false);
+        Type ty = parseType(false, true);
         params.push_back(Param{nameTok.text, ty, nameTok.line, nameTok.col, -1});
     } while (match(TokenType::Comma));
     expect(TokenType::RParen, "')' after parameters");
@@ -125,6 +142,10 @@ StmtPtr Parser::parseVarDecl() {
         // array suffix: int[10] / bool[4]
         if (check(TokenType::LBracket)) {
             advance();
+            if (check(TokenType::RBracket)) {
+                fail("local arrays need a fixed size, e.g. 'int[10]' "
+                     "(slices are only parameter types)");
+            }
             const Token& sizeTok = expect(TokenType::IntLit, "array size");
             long long n = std::strtoll(sizeTok.text.c_str(), nullptr, 10);
             if (n <= 0 || n > 10000000) {

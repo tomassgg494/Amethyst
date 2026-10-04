@@ -72,6 +72,14 @@ fn fib(n: int) -> int {
     return fib(n - 1) + fib(n - 2);
 }
 
+fn sum(values: int[]) -> int {
+    var t = 0;
+    for i in 0..len(values) {
+        t += values[i];
+    }
+    return t;
+}
+
 fn main() -> int {
     var nums: int[5] = [10, 20, 30, 40, 50];
 
@@ -88,6 +96,8 @@ fn main() -> int {
     }
     print(total);
 
+    print(sum(nums));  // same total, through an array parameter
+
     print("done");
     return 0;
 }
@@ -97,10 +107,11 @@ fn main() -> int {
 
 | Form | Meaning |
 |------|---------|
-| `fn name(a: int, b: bool) -> int { ... }` | Function (max 6 params in registers; more are passed on the stack) |
+| `fn name(a: int, b: bool) -> int { ... }` | Function (up to 6 register slots — an array parameter uses 2; the rest are passed on the stack) |
 | `var x: int = expr;` | Local variable (must be initialized) |
 | `var x = expr;` | Type inference from initializer |
 | `var a: int[10] = [1, 2, ...];` | Fixed-size array (element type `int` or `bool`) |
+| `fn f(a: int[])` | Array parameter: `int[]` / `bool[]`, passed as pointer + length |
 | `x = expr;` | Assignment |
 | `x += expr;` | Compound assignment: `+=` `-=` `*=` `/=` `%=` (also on `a[i]`) |
 | `a[i] = expr;` | Array element assignment |
@@ -119,6 +130,8 @@ Entry point: `fn main() -> int` (no parameters).
 - `int` — 64-bit signed integer
 - `bool` — `true` / `false`
 - `int[N]` / `bool[N]` — fixed-size stack arrays (bounds-checked at runtime)
+- `int[]` / `bool[]` — array parameter type: pointer + length; it aliases the
+  caller's array, so the callee can write through it, and `len()` works on it
 - `string` — literals only, usable only with `print` (not storable in variables)
 - `void` — only as a function return type
 
@@ -161,7 +174,8 @@ Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 ```
 
 - Locals live in the stack frame (`-8(%rbp)`, `-16(%rbp)`, …).
-- Register args: `rdi rsi rdx rcx r8 r9`; further args on the stack (copied into the frame on entry).
+- Register args: `rdi rsi rdx rcx r8 r9` (an array parameter occupies two of
+  them); further args on the stack (copied into the frame on entry).
 - `print` lowers to `printf("%ld\n", ...)`.
 
 Errors are reported as `file:line:col: error: message`. Warnings
@@ -179,8 +193,7 @@ Division or modulo by zero prints
 ## Roadmap (not in v1.1)
 
 Pointers, structs, floats, string values (variables, comparisons), heap
-allocation, modules, optimizations, definite-assignment analysis, passing
-arrays to functions.
+allocation, modules, optimizations, definite-assignment analysis.
 
 ## Project layout
 

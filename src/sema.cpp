@@ -2,6 +2,12 @@
 
 #include <algorithm>
 
+// `int[]` is the generic (slice) spelling; locals are printed as `int[10]`.
+static std::string fixedArrayName(Type t, int n) {
+    return std::string(t == Type::ArrayBool ? "bool" : "int") + "[" +
+           std::to_string(n) + "]";
+}
+
 void Sema::fail(const std::string& msg, int line, int col) const {
     throw SemaError(msg, line, col);
 }
@@ -94,8 +100,10 @@ void Sema::checkFunction(FnDecl& fn) {
     pushScope();
 
     for (auto& p : fn.params) {
-        p.slot = nextSlot_++;
-        VarInfo pi{p.type, p.slot, 0};
+        int units = isArrayType(p.type) ? 2 : 1;  // slice = {ptr, len}
+        p.slot = nextSlot_;
+        nextSlot_ += units;
+        VarInfo pi{p.type, p.slot, isArrayType(p.type) ? -1 : 0};
         pi.isParam = true;
         declare(p.name, pi, p.line, p.col);
     }
@@ -178,8 +186,8 @@ void Sema::requireUsable(const Expr& expr, Type t, const char* what) {
     }
     if (isArrayType(t)) {
         fail(std::string(what) +
-                 ": arrays cannot be used in this context yet (only var, index, "
-                 "and print of elements)",
+                 ": arrays cannot be used in this context (only var "
+                 "initializers, indexing, len() and passing to functions)",
              expr.line, expr.col);
     }
 }
@@ -192,6 +200,13 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
 
         case StmtKind::VarDecl: {
             Type initType = checkExpr(*stmt.expr);
+
+            if (isArrayType(initType) && stmt.expr->kind != ExprKind::ArrayLit) {
+                fail("array variable '" + stmt.name +
+                         "' must be initialized with an array literal "
+                         "(copy elements one by one)",
+                     stmt.line, stmt.col);
+            }
 
             if (stmt.typeInferred) {
                 if (initType == Type::Error || initType == Type::Void) {
@@ -209,9 +224,10 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             } else if (isArrayType(stmt.declaredType)) {
                 if (initType != stmt.declaredType) {
                     fail(std::string("cannot initialize '") +
-                             typeName(stmt.declaredType) + "[" +
-                             std::to_string(stmt.declaredSize) + "] " + stmt.name +
-                             "' with value of type '" + typeName(initType) + "'",
+                             fixedArrayName(stmt.declaredType,
+                                            stmt.declaredSize) +
+                             " " + stmt.name + "' with value of type '" +
+                             typeName(initType) + "'",
                          stmt.line, stmt.col);
                 }
                 if (stmt.expr->arraySize != stmt.declaredSize) {
@@ -627,7 +643,17 @@ Type Sema::checkCall(Expr& expr) {
             }
             for (size_t a = 0; a < expr.args.size(); ++a) {
                 Type argType = checkExpr(*expr.args[a]);
-                requireUsable(*expr.args[a], argType, "argument");
+                if (isArrayType(info.paramTypes[a])) {
+                    if (isArrayType(argType) &&
+                        expr.args[a]->kind != ExprKind::Ident) {
+                        fail("array argument " + std::to_string(a + 1) + " of '" +
+                                 expr.name +
+                                 "' must be a variable (assign the array first)",
+                             expr.args[a]->line, expr.args[a]->col);
+                    }
+                } else {
+                    requireUsable(*expr.args[a], argType, "argument");
+                }
                 if (argType != info.paramTypes[a]) {
                     fail("argument " + std::to_string(a + 1) + " of '" +
                              expr.name + "': expected '" +

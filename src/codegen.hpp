@@ -17,9 +17,11 @@ private:
     void emitExprBool(const Expr& expr);
     void emitCall(const Expr& expr);
 
-    void emitBoundsCheck(long long size);  // index in %rax on entry
-    void emitDivGuard();                   // %rcx is the divisor; aborts if 0
-    void emitIntOp(TokenType op);          // lhs %rax, rhs %rcx → result %rax
+    void emitBoundsCheck(const Expr& indexExpr);  // index in %rax on entry
+    void emitArrayBase(const Expr& arr, const std::string& reg);
+    void emitArrayLength(const Expr& arr);        // result in %rax
+    void emitDivGuard();                          // %rcx is the divisor; aborts if 0
+    void emitIntOp(TokenType op);                 // lhs %rax, rhs %rcx → result %rax
     void emitAlignedCall(const std::string& target);  // uses current rsp state
 
     int slotOffset(int slot) const;

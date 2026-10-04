@@ -1,0 +1,8 @@
+fn total(a: int[]) -> int {
+    return len(a);
+}
+
+fn main() -> int {
+    print(total([1, 2, 3]));
+    return 0;
+}

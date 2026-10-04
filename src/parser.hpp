@@ -30,7 +30,7 @@ private:
     [[noreturn]] void fail(const std::string& msg) const;
     [[noreturn]] void failAt(const Token& tok, const std::string& msg) const;
 
-    Type parseType(bool allowVoid);
+    Type parseType(bool allowVoid, bool allowSlice = false);
     FnDecl parseFunction();
     std::vector<Param> parseParams();
 

@@ -148,6 +148,96 @@ expected_compound="4
 106"
 check "compound output" "$expected_compound" "$out"
 
+# array parameters (slices)
+$BIN -o build/slices examples/slices.amt
+set +e
+out=$(./build/slices)
+rc=$?
+set -e
+expected_slices="150
+2
+-1
+1
+5
+15
+3"
+check "slices output" "$expected_slices" "$out"
+
+# slice ABI: >6 integer args, and a slice mixed with scalars
+cat > build/abi.amt <<'EOF'
+fn seven(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> int {
+    return a + b + c + d + e + f + g;
+}
+
+fn many(a: int[], b: int, c: int, d: int, e: int, f: int, g: int) -> int {
+    var total = 0;
+    for i in 0..len(a) {
+        total += a[i];
+    }
+    return total + b + c + d + e + f + g;
+}
+
+fn fourAndSlice(a: int, b: int, c: int, d: int, s: int[]) -> int {
+    var total = a + b + c + d;
+    for i in 0..len(s) {
+        total += s[i];
+    }
+    return total;
+}
+
+fn fiveAndSlice(a: int, b: int, c: int, d: int, e: int, s: int[]) -> int {
+    var total = a + b + c + d + e;
+    for i in 0..len(s) {
+        total += s[i];
+    }
+    return total;
+}
+
+fn main() -> int {
+    var s: int[3] = [10, 20, 30];
+    print(seven(1, 2, 3, 4, 5, 6, 7));
+    print(many(s, 1, 2, 3, 4, 5, 6));
+    print(fourAndSlice(1, 2, 3, 4, s));
+    print(fiveAndSlice(1, 2, 3, 4, 5, s));
+    return 0;
+}
+EOF
+$BIN -o build/abi build/abi.amt
+set +e
+out=$(./build/abi)
+rc=$?
+set -e
+check "slice/stack argument ABI" "28
+81
+70
+75" "$out"
+
+# a slice is bounds-checked against its runtime length
+cat > build/sliceoob.amt <<'EOF'
+fn first(a: int[]) -> int {
+    return a[5];
+}
+
+fn main() -> int {
+    var s: int[3] = [1, 2, 3];
+    print(first(s));
+    return 0;
+}
+EOF
+$BIN -o build/sliceoob build/sliceoob.amt
+set +e
+err=$(./build/sliceoob 2>&1)
+rc=$?
+set -e
+if [[ $rc -eq 1 && "$err" == *"index 5 out of bounds for array of size 3"* ]]; then
+  PASS=$((PASS + 1))
+  echo "  PASS  runtime slice bounds check"
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL  runtime slice bounds check (rc=$rc)"
+  echo "        err: $err"
+fi
+
 # warnings are reported on stderr but do not fail the compilation
 cat > build/warn.amt <<'EOF'
 fn main() -> int {
@@ -264,6 +354,11 @@ expect_fail "compound on bool" tests/err_compound_bool.amt "'+=' expects int on 
 expect_fail "len of non-array" tests/err_len_nonarray.amt "'len' expects an array argument"
 expect_fail "len arity" tests/err_len_arity.amt "'len' expects 1 argument(s), got 0"
 expect_fail "len redefinition" tests/err_len_redef.amt "'len' is a builtin and cannot be redefined"
+expect_fail "array literal argument" tests/err_array_arg_literal.amt "must be a variable (assign the array first)"
+expect_fail "slice element type" tests/err_slice_elem_type.amt "expected 'bool[]', got 'int[]'"
+expect_fail "sized array parameter" tests/err_param_array_size.amt "array parameters must be written as 'int[]'"
+expect_fail "slice local variable" tests/err_slice_local.amt "local arrays need a fixed size"
+expect_fail "array copy" tests/err_array_copy.amt "must be initialized with an array literal"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

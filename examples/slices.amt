@@ -1,0 +1,50 @@
+// array parameters: fn f(a: int[]) carries pointer + length and aliases
+// the caller's array (mutations are visible on both sides)
+fn sum(a: int[]) -> int {
+    var total = 0;
+    for i in 0..len(a) {
+        total += a[i];
+    }
+    return total;
+}
+
+fn find(a: int[], v: int) -> int {
+    for i in 0..len(a) {
+        if a[i] == v {
+            return i;
+        }
+    }
+    return -1;
+}
+
+fn fill(a: int[], base: int) -> void {
+    for i in 0..len(a) {
+        a[i] = base + i;
+    }
+}
+
+fn countTrue(flags: bool[]) -> int {
+    var n = 0;
+    for i in 0..len(flags) {
+        if flags[i] {
+            n += 1;
+        }
+    }
+    return n;
+}
+
+fn main() -> int {
+    var nums: int[5] = [10, 20, 30, 40, 50];
+    print(sum(nums));       // 150
+    print(find(nums, 30));  // 2
+    print(find(nums, 99));  // -1
+
+    fill(nums, 1);
+    print(nums[0]);         // 1
+    print(nums[4]);         // 5
+    print(sum(nums));       // 15
+
+    var flags: bool[4] = [true, false, true, true];
+    print(countTrue(flags));  // 3
+    return 0;
+}

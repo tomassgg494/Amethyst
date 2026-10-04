@@ -98,15 +98,29 @@ void Codegen::emitFunction(const FnDecl& fn, const Program& program) {
     }
 
     static const char* argRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
-    for (size_t i = 0; i < fn.params.size(); ++i) {
-        int off = slotOffset(fn.params[i].slot);
-        if (i < 6) {
-            out_ += "    movq " + std::string(argRegs[i]) + ", " +
-                    std::to_string(off) + "(%rbp)\n";
+    int regIdx = 0;
+    int stackOff = 16;
+    for (const auto& p : fn.params) {
+        // a slice is {ptr, len} and therefore occupies two units
+        int units = isArrayType(p.type) ? 2 : 1;
+        std::string ptrSlot = std::to_string(slotOffset(p.slot)) + "(%rbp)";
+        std::string lenSlot =
+            std::to_string(slotOffset(p.slot + 1)) + "(%rbp)";
+        if (regIdx + units <= 6) {
+            out_ += "    movq " + std::string(argRegs[regIdx]) + ", " + ptrSlot + "\n";
+            if (units == 2) {
+                out_ += "    movq " + std::string(argRegs[regIdx + 1]) + ", " +
+                        lenSlot + "\n";
+            }
+            regIdx += units;
         } else {
-            int src = 16 + 8 * static_cast<int>(i - 6);
-            out_ += "    movq " + std::to_string(src) + "(%rbp), %rax\n";
-            out_ += "    movq %rax, " + std::to_string(off) + "(%rbp)\n";
+            out_ += "    movq " + std::to_string(stackOff) + "(%rbp), %rax\n";
+            out_ += "    movq %rax, " + ptrSlot + "\n";
+            if (units == 2) {
+                out_ += "    movq " + std::to_string(stackOff + 8) + "(%rbp), %rax\n";
+                out_ += "    movq %rax, " + lenSlot + "\n";
+            }
+            stackOff += units * 8;
         }
     }
 
@@ -118,25 +132,54 @@ void Codegen::emitFunction(const FnDecl& fn, const Program& program) {
     out_ += ".size " + fn.name + ", .-" + fn.name + "\n";
 }
 
-void Codegen::emitBoundsCheck(long long size) {
-    // index in %rax
+void Codegen::emitBoundsCheck(const Expr& idx) {
+    // index in %rax; idx carries slot + arraySize (-1 → length in memory)
     std::string okL = newLabel("idx_ok");
     std::string failL = newLabel("idx_fail");
+    std::string lenRef =
+        std::to_string(slotOffset(idx.slot) - 8) + "(%rbp)";
 
     out_ += "    cmpq $0, %rax\n";
     out_ += "    jl " + failL + "\n";
-    out_ += "    cmpq $" + std::to_string(size) + ", %rax\n";
+    if (idx.arraySize >= 0) {
+        out_ += "    cmpq $" + std::to_string(idx.arraySize) + ", %rax\n";
+    } else {
+        out_ += "    cmpq " + lenRef + ", %rax\n";
+    }
     out_ += "    jge " + failL + "\n";
     out_ += "    jmp " + okL + "\n";
     out_ += failL + ":\n";
     out_ += "    movq %rax, %rdi\n";  // index
-    out_ += "    movq $" + std::to_string(size) + ", %rsi\n";
+    if (idx.arraySize >= 0) {
+        out_ += "    movq $" + std::to_string(idx.arraySize) + ", %rsi\n";
+    } else {
+        out_ += "    movq " + lenRef + ", %rsi\n";
+    }
     // Force 16-byte alignment regardless of live pushes, then call (noreturn).
     out_ += "    movq %rsp, %r11\n";
     out_ += "    andq $-16, %rsp\n";
     out_ += "    call __amethyst_bounds_fail@PLT\n";
     out_ += "    movq %r11, %rsp\n";
     out_ += okL + ":\n";
+}
+
+void Codegen::emitArrayBase(const Expr& arr, const std::string& reg) {
+    // local array → address of element 0; slice → the stored pointer
+    std::string slot = std::to_string(slotOffset(arr.slot)) + "(%rbp)";
+    if (arr.arraySize >= 0) {
+        out_ += "    leaq " + slot + ", " + reg + "\n";
+    } else {
+        out_ += "    movq " + slot + ", " + reg + "\n";
+    }
+}
+
+void Codegen::emitArrayLength(const Expr& arr) {
+    if (arr.arraySize >= 0) {
+        out_ += "    movq $" + std::to_string(arr.arraySize) + ", %rax\n";
+    } else {
+        out_ += "    movq " + std::to_string(slotOffset(arr.slot) - 8) +
+                "(%rbp), %rax\n";
+    }
 }
 
 void Codegen::emitDivGuard() {
@@ -238,11 +281,9 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
             out_ += "    pushq %rax\n";
             stackDepth_++;
             emitExpr(*stmt.target->rhs);  // index
-            emitBoundsCheck(stmt.target->arraySize);
+            emitBoundsCheck(*stmt.target);
             out_ += "    shlq $3, %rax\n";  // index * 8
-            out_ += "    leaq " +
-                    std::to_string(slotOffset(stmt.target->slot)) +
-                    "(%rbp), %rcx\n";
+            emitArrayBase(*stmt.target, "%rcx");
             out_ += "    subq %rax, %rcx\n";  // rcx = &elem
             if (stmt.compoundOp != TokenType::Eof) {
                 // stack: [rhs, &elem]; read old, combine with rhs, write back
@@ -397,9 +438,8 @@ void Codegen::emitExpr(const Expr& expr) {
 
         case ExprKind::Ident:
             if (isArrayType(expr.type)) {
-                // array used as whole → address (defensive; sema blocks most uses)
-                out_ += "    leaq " +
-                        std::to_string(slotOffset(expr.slot)) + "(%rbp), %rax\n";
+                // local array → address of element 0; slice → stored pointer
+                emitArrayBase(expr, "%rax");
             } else {
                 out_ += "    movq " + std::to_string(slotOffset(expr.slot)) +
                         "(%rbp), %rax\n";
@@ -408,10 +448,9 @@ void Codegen::emitExpr(const Expr& expr) {
 
         case ExprKind::Index: {
             emitExpr(*expr.rhs);  // index → rax
-            emitBoundsCheck(expr.arraySize);
+            emitBoundsCheck(expr);
             out_ += "    shlq $3, %rax\n";
-            out_ += "    leaq " + std::to_string(slotOffset(expr.slot)) +
-                    "(%rbp), %rcx\n";
+            emitArrayBase(expr, "%rcx");
             out_ += "    subq %rax, %rcx\n";
             out_ += "    movq (%rcx), %rax\n";
             break;
@@ -542,21 +581,29 @@ void Codegen::emitCall(const Expr& expr) {
     static const char* argRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 
     if (expr.name == "len") {
-        if (expr.arraySize >= 0) {
-            out_ += "    movq $" + std::to_string(expr.arraySize) + ", %rax\n";
-        } else {
-            // slice: length lives in the slot right below the pointer
-            out_ += "    movq " +
-                    std::to_string(slotOffset(expr.args[0]->slot) - 8) +
-                    "(%rbp), %rax\n";
-        }
+        emitArrayLength(*expr.args[0]);
         return;
     }
 
     size_t n = expr.args.size();
-    size_t stackArgs = n > 6 ? n - 6 : 0;
-    size_t regStorage = (n < 6 ? n : 6) * 8;
-    size_t stackStorage = stackArgs * 8;
+    std::vector<size_t> units(n, 1);
+    std::vector<bool> inRegs(n, false);
+    size_t regUnits = 0;
+    size_t stackUnits = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (isArrayType(expr.args[i]->type)) units[i] = 2;
+        // a slice needs two registers; if they are not all free it is
+        // passed entirely on the stack (System V classification)
+        if (regUnits + units[i] <= 6) {
+            inRegs[i] = true;
+            regUnits += units[i];
+        } else {
+            stackUnits += units[i];
+        }
+    }
+
+    size_t stackStorage = stackUnits * 8;
+    size_t regStorage = regUnits * 8;
 
     size_t total = stackStorage + regStorage;
     int live = stackDepth_ * 8;
@@ -566,15 +613,41 @@ void Codegen::emitCall(const Expr& expr) {
         out_ += "    subq $" + std::to_string(total) + ", %rsp\n";
     }
 
+    // temp slots: stack args come first (that is what the callee reads),
+    // then the payload only used to load the argument registers
+    std::vector<size_t> off(n, 0);
+    size_t stackCur = 0;
+    size_t regCur = stackStorage;
     for (size_t i = 0; i < n; ++i) {
-        emitExpr(*expr.args[i]);
-        size_t off = (i >= 6) ? (i - 6) * 8 : stackStorage + i * 8;
-        out_ += "    movq %rax, " + std::to_string(off) + "(%rsp)\n";
+        if (inRegs[i]) {
+            off[i] = regCur;
+            regCur += units[i] * 8;
+        } else {
+            off[i] = stackCur;
+            stackCur += units[i] * 8;
+        }
     }
 
-    for (size_t i = 0; i < n && i < 6; ++i) {
-        out_ += "    movq " + std::to_string(stackStorage + i * 8) +
-                "(%rsp), " + argRegs[i] + "\n";
+    for (size_t i = 0; i < n; ++i) {
+        emitExpr(*expr.args[i]);
+        out_ += "    movq %rax, " + std::to_string(off[i]) + "(%rsp)\n";
+        if (units[i] == 2) {
+            emitArrayLength(*expr.args[i]);
+            out_ += "    movq %rax, " + std::to_string(off[i] + 8) +
+                    "(%rsp)\n";
+        }
+    }
+
+    size_t regIdx = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (!inRegs[i]) continue;
+        out_ += "    movq " + std::to_string(off[i]) + "(%rsp), " +
+                argRegs[regIdx] + "\n";
+        if (units[i] == 2) {
+            out_ += "    movq " + std::to_string(off[i] + 8) + "(%rsp), " +
+                    argRegs[regIdx + 1] + "\n";
+        }
+        regIdx += units[i];
     }
 
     out_ += "    call " + expr.name + "@PLT\n";
