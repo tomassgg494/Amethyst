@@ -130,6 +130,13 @@ line1
 line2
 n is:
 7
+v1.1
+1
+0
+4
+[amethyst]
+[guest]
+v1.2
 positive'
 check "strings output" "$expected_strings" "$out"
 
@@ -193,12 +200,25 @@ fn fiveAndSlice(a: int, b: int, c: int, d: int, e: int, s: int[]) -> int {
     return total;
 }
 
+fn strAndSlice(name: string, label: string, nums: int[]) -> int {
+    if name == label {
+        var total = 0;
+        for i in 0..len(nums) {
+            total += nums[i];
+        }
+        return total;
+    }
+    return len(name);
+}
+
 fn main() -> int {
     var s: int[3] = [10, 20, 30];
     print(seven(1, 2, 3, 4, 5, 6, 7));
     print(many(s, 1, 2, 3, 4, 5, 6));
     print(fourAndSlice(1, 2, 3, 4, s));
     print(fiveAndSlice(1, 2, 3, 4, 5, s));
+    print(strAndSlice("same", "same", s));
+    print(strAndSlice("ab", "cd", s));
     return 0;
 }
 EOF
@@ -210,7 +230,9 @@ set -e
 check "slice/stack argument ABI" "28
 81
 70
-75" "$out"
+75
+60
+2" "$out"
 
 # a slice is bounds-checked against its runtime length
 cat > build/sliceoob.amt <<'EOF'
@@ -349,9 +371,12 @@ expect_fail "break outside loop" tests/err_break_outside.amt "'break' outside of
 expect_fail "index non-array" tests/err_index_nonarray.amt "cannot index into a value of type 'int'"
 expect_fail "array size mismatch" tests/err_array_size.amt "array size mismatch"
 expect_fail "array elem type" tests/err_array_elem_type.amt "array element 2 has type 'bool'"
-expect_fail "string in var" tests/err_string_var.amt "cannot store a string"
+expect_fail "string into int" tests/err_string_var.amt "cannot initialize 'int n' with a string literal"
+expect_fail "string arithmetic" tests/err_string_arith.amt "operator expects int operands, got 'string' and 'int'"
+expect_fail "string compared with int" tests/err_string_cmp.amt "cannot compare 'string' with 'int' with == / !="
+expect_fail "array compared" tests/err_array_cmp.amt "cannot compare arrays with == / !="
 expect_fail "compound on bool" tests/err_compound_bool.amt "'+=' expects int on both sides"
-expect_fail "len of non-array" tests/err_len_nonarray.amt "'len' expects an array argument"
+expect_fail "len of non-array" tests/err_len_nonarray.amt "'len' expects an array or string argument"
 expect_fail "len arity" tests/err_len_arity.amt "'len' expects 1 argument(s), got 0"
 expect_fail "len redefinition" tests/err_len_redef.amt "'len' is a builtin and cannot be redefined"
 expect_fail "array literal argument" tests/err_array_arg_literal.amt "must be a variable (assign the array first)"

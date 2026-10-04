@@ -1,5 +1,5 @@
 fn main() -> int {
-    var s = "nope";
-    print(s);
+    var n: int = "nope";
+    print(n);
     return 0;
 }

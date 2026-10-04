@@ -10,6 +10,7 @@ enum class TokenType {
     KwVar,
     KwInt,
     KwBool,
+    KwString,
     KwVoid,
     KwReturn,
     KwIf,

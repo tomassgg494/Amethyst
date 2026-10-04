@@ -49,10 +49,13 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
         base = Type::Int;
     } else if (match(TokenType::KwBool)) {
         base = Type::Bool;
+    } else if (match(TokenType::KwString)) {
+        return Type::Str;
     } else if (allowVoid && match(TokenType::KwVoid)) {
         return Type::Void;
     } else {
-        fail("expected type (int, bool" + std::string(allowVoid ? ", void" : "") + ")");
+        fail("expected type (int, bool, string" +
+             std::string(allowVoid ? ", void" : "") + ")");
     }
 
     // slice parameter type: int[] / bool[]
@@ -62,7 +65,8 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
                  "(the length is not part of the type)");
         }
         expect(TokenType::RBracket, "']' after '['");
-        return base == Type::Bool ? Type::ArrayBool : Type::ArrayInt;
+        if (base == Type::Bool) return Type::ArrayBool;
+        return Type::ArrayInt;
     }
     return base;
 }
@@ -141,6 +145,9 @@ StmtPtr Parser::parseVarDecl() {
         ty = parseType(false);
         // array suffix: int[10] / bool[4]
         if (check(TokenType::LBracket)) {
+            if (ty == Type::Str) {
+                fail("arrays of strings are not supported (only int and bool)");
+            }
             advance();
             if (check(TokenType::RBracket)) {
                 fail("local arrays need a fixed size, e.g. 'int[10]' "

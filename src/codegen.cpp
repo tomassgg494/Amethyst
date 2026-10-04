@@ -156,10 +156,7 @@ void Codegen::emitBoundsCheck(const Expr& idx) {
         out_ += "    movq " + lenRef + ", %rsi\n";
     }
     // Force 16-byte alignment regardless of live pushes, then call (noreturn).
-    out_ += "    movq %rsp, %r11\n";
-    out_ += "    andq $-16, %rsp\n";
-    out_ += "    call __amethyst_bounds_fail@PLT\n";
-    out_ += "    movq %r11, %rsp\n";
+    emitAlignedCall("__amethyst_bounds_fail");
     out_ += okL + ":\n";
 }
 
@@ -182,6 +179,18 @@ void Codegen::emitArrayLength(const Expr& arr) {
     }
 }
 
+void Codegen::emitAlignedCall(const std::string& target) {
+    // rsp must be 16-byte aligned at the call. Park it in %rbx, which is
+    // callee-saved and therefore still valid after the call (unlike %r11),
+    // then restore the frame exactly — also when rsp had to shift by 8.
+    out_ += "    pushq %rbx\n";
+    out_ += "    movq %rsp, %rbx\n";
+    out_ += "    andq $-16, %rsp\n";
+    out_ += "    call " + target + "@PLT\n";
+    out_ += "    movq %rbx, %rsp\n";
+    out_ += "    popq %rbx\n";
+}
+
 void Codegen::emitDivGuard() {
     // divisor in %rcx
     std::string okL = newLabel("div_ok");
@@ -189,10 +198,7 @@ void Codegen::emitDivGuard() {
     out_ += "    testq %rcx, %rcx\n";
     out_ += "    jne " + okL + "\n";
     // Force 16-byte alignment regardless of live pushes, then call (noreturn).
-    out_ += "    movq %rsp, %r11\n";
-    out_ += "    andq $-16, %rsp\n";
-    out_ += "    call __amethyst_div_fail@PLT\n";
-    out_ += "    movq %r11, %rsp\n";
+    emitAlignedCall("__amethyst_div_fail");
     out_ += okL + ":\n";
 }
 
@@ -393,10 +399,9 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
         }
 
         case StmtKind::Print: {
-            if (stmt.expr->kind == ExprKind::StrLit) {
-                std::string label = ".Lstr_" + std::to_string(strCounter_++);
-                strings_.push_back({label, stmt.expr->strValue});
-                out_ += "    leaq " + label + "(%rip), %rdi\n";
+            if (stmt.expr->type == Type::Str) {
+                emitExpr(*stmt.expr);  // %rax = pointer to NUL-terminated text
+                out_ += "    movq %rax, %rdi\n";
                 out_ += "    call puts@PLT\n";
             } else {
                 emitExpr(*stmt.expr);
@@ -506,6 +511,19 @@ void Codegen::emitExpr(const Expr& expr) {
             out_ += "    popq %rax\n";
             stackDepth_--;
 
+            // strings compare by content, not by pointer
+            if (expr.lhs->type == Type::Str &&
+                (op == TokenType::EqEq || op == TokenType::NotEq)) {
+                out_ += "    movq %rax, %rdi\n";  // lhs → rdi
+                out_ += "    movq %rcx, %rsi\n";  // rhs → rsi
+                emitAlignedCall("strcmp");
+                out_ += "    testl %eax, %eax\n";
+                out_ += std::string("    ") +
+                        (op == TokenType::EqEq ? "sete" : "setne") + " %al\n";
+                out_ += "    movzbq %al, %rax\n";
+                break;
+            }
+
             switch (op) {
                 case TokenType::Plus:
                     out_ += "    addq %rcx, %rax\n";
@@ -581,7 +599,13 @@ void Codegen::emitCall(const Expr& expr) {
     static const char* argRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 
     if (expr.name == "len") {
-        emitArrayLength(*expr.args[0]);
+        if (expr.args[0]->type == Type::Str) {
+            emitExpr(*expr.args[0]);  // %rax = pointer
+            out_ += "    movq %rax, %rdi\n";
+            emitAlignedCall("strlen");
+        } else {
+            emitArrayLength(*expr.args[0]);
+        }
         return;
     }
 

@@ -180,10 +180,6 @@ void Sema::checkBlock(Stmt& block, Type fnReturn) {
 }
 
 void Sema::requireUsable(const Expr& expr, Type t, const char* what) {
-    if (t == Type::Str) {
-        fail(std::string(what) + ": string literals can only be used with print",
-             expr.line, expr.col);
-    }
     if (isArrayType(t)) {
         fail(std::string(what) +
                  ": arrays cannot be used in this context (only var "
@@ -213,10 +209,6 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                     fail("cannot infer type of '" + stmt.name + "' from this initializer",
                          stmt.line, stmt.col);
                 }
-                if (initType == Type::Str) {
-                    fail("cannot store a string in a variable (v1.1: strings only in print)",
-                         stmt.line, stmt.col);
-                }
                 stmt.declaredType = initType;
                 if (isArrayType(initType)) {
                     stmt.declaredSize = stmt.expr->arraySize;
@@ -237,7 +229,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                          stmt.line, stmt.col);
                 }
             } else {
-                if (initType == Type::Str) {
+                if (initType == Type::Str && stmt.declaredType != Type::Str) {
                     fail(std::string("cannot initialize '") +
                              typeName(stmt.declaredType) + " " + stmt.name +
                              "' with a string literal",
@@ -589,9 +581,16 @@ Type Sema::checkBinary(Expr& expr) {
             return Type::Bool;
         case TokenType::EqEq:
         case TokenType::NotEq:
-            if (left == Type::Str || isArrayType(left)) {
-                fail("cannot compare strings or arrays with == / !=", expr.line,
-                     expr.col);
+            if (left == Type::Str) {
+                if (right != Type::Str) {
+                    fail(std::string("cannot compare 'string' with '") +
+                             typeName(right) + "' with == / !=",
+                         expr.line, expr.col);
+                }
+                return Type::Bool;
+            }
+            if (isArrayType(left)) {
+                fail("cannot compare arrays with == / !=", expr.line, expr.col);
             }
             if (left != right || left == Type::Void || left == Type::Error) {
                 fail(std::string("cannot compare '") + typeName(left) +
@@ -621,13 +620,15 @@ Type Sema::checkCall(Expr& expr) {
                  expr.line, expr.col);
         }
         Type argType = checkExpr(*expr.args[0]);
-        if (!isArrayType(argType)) {
-            fail(std::string("'len' expects an array argument, got '") +
+        if (!isArrayType(argType) && argType != Type::Str) {
+            fail(std::string("'len' expects an array or string argument, got '") +
                      typeName(argType) + "'",
                  expr.args[0]->line, expr.args[0]->col);
         }
-        // 0 ≥ 0 → size known at compile time; -1 → runtime length (slice)
-        expr.arraySize = expr.args[0]->arraySize;
+        // 0 ≥ 0 → size known at compile time; -1 → runtime length (slice);
+        // strings always need strlen at runtime
+        expr.arraySize =
+            argType == Type::Str ? -1 : expr.args[0]->arraySize;
         return Type::Int;
     }
 

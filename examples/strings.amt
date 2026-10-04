@@ -1,12 +1,31 @@
+fn tag(name: string) -> string {
+    if name == "amethyst" {
+        return "[amethyst]";
+    }
+    return "[guest]";
+}
+
 fn main() -> int {
     print("Hello, Amethyst!");
     print("string with\ttab and \"quotes\"");
     print("line1\nline2");
 
     var n = 7;
-    // strings only work with print; combine via separate prints
     print("n is:");
     print(n);
+
+    // strings are ordinary values: store, assign, compare, pass, return
+    var label = "v1.1";
+    var same: string = "v1.1";
+    print(label);
+    print(label == same);
+    print(label == "v1.2");
+    print(len(label));
+    print(tag("amethyst"));
+    print(tag("other"));
+
+    label = "v1.2";
+    print(label);
 
     if n > 0 {
         print("positive");

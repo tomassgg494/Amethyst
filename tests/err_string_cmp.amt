@@ -1,0 +1,7 @@
+fn main() -> int {
+    var s = "a";
+    if s == 1 {
+        print(s);
+    }
+    return 0;
+}

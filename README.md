@@ -80,6 +80,13 @@ fn sum(values: int[]) -> int {
     return t;
 }
 
+fn greet(name: string) -> string {
+    if name == "world" {
+        return "hello, world";
+    }
+    return "hello";
+}
+
 fn main() -> int {
     var nums: int[5] = [10, 20, 30, 40, 50];
 
@@ -97,6 +104,7 @@ fn main() -> int {
     print(total);
 
     print(sum(nums));  // same total, through an array parameter
+    print(greet("world"));
 
     print("done");
     return 0;
@@ -112,10 +120,12 @@ fn main() -> int {
 | `var x = expr;` | Type inference from initializer |
 | `var a: int[10] = [1, 2, ...];` | Fixed-size array (element type `int` or `bool`) |
 | `fn f(a: int[])` | Array parameter: `int[]` / `bool[]`, passed as pointer + length |
+| `fn f(a: string)` | String parameter: pointer to NUL-terminated text |
+| `var s: string = "hi";` | String variable (no concatenation, no indexing) |
 | `x = expr;` | Assignment |
 | `x += expr;` | Compound assignment: `+=` `-=` `*=` `/=` `%=` (also on `a[i]`) |
 | `a[i] = expr;` | Array element assignment |
-| `print(expr);` | Print `int`, `bool`, or a string literal |
+| `print(expr);` | Print `int`, `bool`, or `string` |
 
 Entry point: `fn main() -> int` (no parameters).
 
@@ -123,7 +133,7 @@ Entry point: `fn main() -> int` (no parameters).
 
 | Form | Meaning |
 |------|---------|
-| `len(a)` | number of elements of an array; result is a plain `int`, so `for i in 0..len(a)` works |
+| `len(a)` | number of elements of an array, or byte length of a string; result is a plain `int`, so `for i in 0..len(a)` works |
 
 ### Types
 
@@ -132,7 +142,9 @@ Entry point: `fn main() -> int` (no parameters).
 - `int[N]` / `bool[N]` — fixed-size stack arrays (bounds-checked at runtime)
 - `int[]` / `bool[]` — array parameter type: pointer + length; it aliases the
   caller's array, so the callee can write through it, and `len()` works on it
-- `string` — literals only, usable only with `print` (not storable in variables)
+- `string` — NUL-terminated text in `.rodata`; store it in variables, assign,
+  compare with `==` / `!=` (compares contents, not pointers), pass it to and
+  return it from functions. There is no concatenation, indexing or ordering.
 - `void` — only as a function return type
 
 No implicit conversions: `int` and `bool` never mix.
@@ -158,6 +170,9 @@ Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 6. `*` `/` `%`
 7. unary `-` `!`
 8. literals, `ident`, `a[i]`, `call(...)`, `[...]`, `( ... )`
+
+`==` / `!=` also work on `string` operands; `<` `<=` `>` `>=` and all
+arithmetic operators are `int`-only.
 
 ### Comments
 
@@ -192,8 +207,8 @@ Division or modulo by zero prints
 
 ## Roadmap (not in v1.1)
 
-Pointers, structs, floats, string values (variables, comparisons), heap
-allocation, modules, optimizations, definite-assignment analysis.
+Pointers, structs, floats, heap allocation, modules, optimizations,
+definite-assignment analysis.
 
 ## Project layout
 

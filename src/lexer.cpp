@@ -11,6 +11,7 @@ const std::unordered_map<std::string, TokenType>& keywords() {
         {"var", TokenType::KwVar},
         {"int", TokenType::KwInt},
         {"bool", TokenType::KwBool},
+        {"string", TokenType::KwString},
         {"void", TokenType::KwVoid},
         {"return", TokenType::KwReturn},
         {"if", TokenType::KwIf},
