@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 PKG_NAME="amethyst"
-PKG_VERSION="${AMETHYST_VERSION:-1.0.0}"
+PKG_VERSION="${AMETHYST_VERSION:-1.1.0}"
 PKG_ARCH="amd64"
 PKG_MAINTAINER="Amethyst Project <amethyst@localhost>"
 PKG_SECTION="devel"
@@ -90,7 +90,7 @@ Maintainer: $PKG_MAINTAINER
 Installed-Size: $BIN_SIZE
 Depends: gcc, binutils
 Recommends: make
-Homepage: https://github.com/amethyst-lang/amethyst
+Homepage: https://github.com/tomassgg494/Amethyst
 Description: Amethyst language Dev Kit (compiler + examples + docs)
  Amethyst is a small compiled language with syntax halfway between
  high-level (Python, JS) and low-level (C) languages. Fast, statically

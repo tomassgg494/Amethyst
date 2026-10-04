@@ -1,3 +1,22 @@
+amethyst (1.1.0) unstable; urgency=medium
+
+  * Compound assignment (+= -= *= /= %=), len() builtin and a
+    division/modulo-by-zero guard that exits with a runtime error.
+  * Compiler warnings: unused variable and unreachable code, reported
+    on stderr without stopping the build.
+  * Array parameters passed as slices: int[] / bool[] (pointer + length),
+    dynamic bounds checks and for i in 0..len(a).
+  * string type: variables, parameters and returns, == / != compare
+    contents, len() via strlen, print via puts.
+  * float type: 64-bit IEEE 754 binary64 literals and arithmetic on SSE
+    registers, explicit float(n) / int(x) conversions, print with %.15g.
+  * Definite-assignment analysis: `var x: T;` may be left unassigned
+    until every path that reads it has assigned it.
+  * New examples: slices.amt, strings.amt, floats.amt, definite.amt.
+  * Dev Kit Homepage now points at the actual repository.
+
+ -- Amethyst Project <amethyst@localhost>  Sun, 04 Oct 2026 14:00:00 +0000
+
 amethyst (1.0.0) unstable; urgency=medium
 
   * Initial Dev Kit release.

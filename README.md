@@ -5,7 +5,7 @@
 - **Compiled**, not interpreted.
 - Compiler written in **C++17** (no LLVM).
 - Emits **x86-64 GAS assembly**, assembled with `as`, linked with the system linker (`ld` via `gcc` driver).
-- Static typing: `int` (64-bit), `bool`, `void` (return type only).
+- Static typing: `int` (64-bit), `float` (64-bit IEEE 754), `bool`, `string`, `void` (return type only).
 
 **Website & docs:** https://tomassgg494.github.io/Amethyst-site/
 (source: [`tomassgg494/Amethyst-site`](https://github.com/tomassgg494/Amethyst-site))
@@ -26,9 +26,9 @@ Beginners do **not** need to compile the compiler. The Dev Kit ships a ready bin
 
 ```sh
 make deb
-# → dist/amethyst-devkit_1.0.0_amd64.deb
+# → dist/amethyst-devkit_1.1.0_amd64.deb
 
-sudo apt install ./dist/amethyst-devkit_1.0.0_amd64.deb
+sudo apt install ./dist/amethyst-devkit_1.1.0_amd64.deb
 ```
 
 Installed layout:
