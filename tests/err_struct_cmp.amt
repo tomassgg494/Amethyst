@@ -1,0 +1,10 @@
+struct Point { x: int }
+
+fn main() -> int {
+    var a = new Point { x: 1 };
+    var b = new Point { x: 1 };
+    if (a == b) {
+        print(1);
+    }
+    return 0;
+}

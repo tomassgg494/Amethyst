@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "ast.hpp"
@@ -31,6 +32,8 @@ private:
     [[noreturn]] void failAt(const Token& tok, const std::string& msg) const;
 
     Type parseType(bool allowVoid, bool allowSlice = false);
+    void collectStructNames(const std::vector<Token>& tokens);
+    void parseStruct();
     FnDecl parseFunction();
     std::vector<Param> parseParams();
 
@@ -42,6 +45,7 @@ private:
     StmtPtr parseFor();
     StmtPtr parseReturn();
     StmtPtr parsePrint();
+    StmtPtr parseFree();
     StmtPtr parseAssignOrExprStmt();
 
     ExprPtr parseExpression();
@@ -54,7 +58,11 @@ private:
     ExprPtr parseUnary();
     ExprPtr parsePostfix();
     ExprPtr parsePrimary();
+    ExprPtr parseNew();
 
     std::vector<Token> tokens_;
     size_t pos_ = 0;
+    // Filled by parseProgram: the struct table being built, and name → index.
+    Program* prog_ = nullptr;
+    std::unordered_map<std::string, int> structIds_;
 };

@@ -1,0 +1,63 @@
+// structs: heap objects built with `new`, released with `free`.
+// A struct variable holds a reference, so two variables can name one object.
+
+struct Point {
+    x: int,
+    y: float,
+    label: string
+}
+
+struct Node {
+    value: int,
+    next: Node
+}
+
+fn origin() -> Point {
+    return new Point { x: 0, y: 0.0, label: "origem" };
+}
+
+fn moveX(p: Point, dx: int) -> void {
+    p.x += dx;
+}
+
+fn chainSum(n: Node) -> int {
+    var total = 0;
+    var cur = n;
+    while (cur != null) {
+        total += cur.value;
+        cur = cur.next;
+    }
+    return total;
+}
+
+fn main() -> int {
+    // every field must be given exactly once, in any order
+    var p = new Point { label: "centro", y: 2.5, x: 10 };
+    print(p.x);        // 10
+    print(p.y);        // 2.5
+    print(p.label);    // centro
+
+    p.x = 20;
+    moveX(p, 5);
+    print(p.x);        // 25
+
+    var q = p;         // alias: p and q name the same object
+    q.x = 30;
+    print(p.x);        // 30
+
+    var o = origin();
+    print(o.x);        // 0
+    print(o == null);  // 0
+
+    var tail = new Node { value: 5, next: null };
+    var head = new Node { value: 7, next: tail };
+    print(chainSum(head));   // 12
+    print(head.next.value);  // 5
+
+    free(tail);
+    free(head);
+    free(o);
+    free(p);           // p and q are the same object: free it once
+    print(p == null);  // 1
+    return 0;
+}

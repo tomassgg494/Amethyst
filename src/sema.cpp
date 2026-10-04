@@ -7,6 +7,41 @@ static std::string fixedArrayName(const Type& elem, int n) {
     return typeName(elem, {}) + "[" + std::to_string(n) + "]";
 }
 
+// A struct-typed slot also accepts the `null` literal.
+static bool acceptsNull(const Type& target, const Type& value) {
+    return target.kind == Type::Kind::Struct && value == Type::Null;
+}
+
+// Levenshtein distance, used for "did you mean" suggestions.
+static int editDistance(const std::string& a, const std::string& b) {
+    const size_t n = a.size(), m = b.size();
+    std::vector<int> prev(m + 1), cur(m + 1);
+    for (size_t j = 0; j <= m; ++j) prev[j] = static_cast<int>(j);
+    for (size_t i = 1; i <= n; ++i) {
+        cur[0] = static_cast<int>(i);
+        for (size_t j = 1; j <= m; ++j) {
+            int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+            cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost});
+        }
+        prev = cur;
+    }
+    return prev[m];
+}
+
+static std::string suggestName(const std::string& name,
+                               const std::vector<std::string>& candidates) {
+    std::string best;
+    int bestDist = 3;  // suggest only when reasonably close
+    for (const auto& c : candidates) {
+        int d = editDistance(name, c);
+        if (d < bestDist) {
+            bestDist = d;
+            best = c;
+        }
+    }
+    return best;
+}
+
 void Sema::fail(const std::string& msg, int line, int col) const {
     throw SemaError(msg, line, col);
 }
@@ -124,6 +159,9 @@ void Sema::checkMain(Program& program) {
 void Sema::analyze(Program& program) {
     warnings_.clear();
     program_ = &program;
+    for (auto& s : program.structs) {
+        s.sizeBytes = static_cast<int>(s.fields.size()) * 8;
+    }
     collectFunctions(program);
     checkMain(program);
     for (auto& fn : program.functions) {
@@ -251,7 +289,8 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             }
 
             if (stmt.typeInferred) {
-                if (initType == Type::Error || initType == Type::Void) {
+                if (initType == Type::Error || initType == Type::Void ||
+                    initType == Type::Null) {
                     fail("cannot infer type of '" + stmt.name + "' from this initializer",
                          stmt.line, stmt.col);
                 }
@@ -281,7 +320,8 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                              "' with a string literal",
                          stmt.line, stmt.col);
                 }
-                if (initType != stmt.declaredType) {
+                if (initType != stmt.declaredType &&
+                    !acceptsNull(stmt.declaredType, initType)) {
                     fail(std::string("cannot initialize '") +
                              tyName(stmt.declaredType) + " " + stmt.name +
                              "' with value of type '" + tyName(initType) + "'",
@@ -304,91 +344,115 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
         }
 
         case StmtKind::Assign: {
-            VarInfo* var = lookup(stmt.name);
-            if (!var) {
-                fail("assignment to undeclared variable '" + stmt.name + "'",
+            if (stmt.target == nullptr) {
+                fail("invalid assignment target", stmt.line, stmt.col);
+            }
+
+            // Resolve the lvalue. An identifier is handled directly so that a
+            // plain '=' may initialize a variable that was not assigned yet;
+            // index and field chains go through checkExpr (their base must be
+            // definitely assigned before it can be dereferenced).
+            Type targetType = Type::Error;
+            VarInfo* var = nullptr;
+            if (stmt.target->kind == ExprKind::Ident) {
+                var = lookup(stmt.target->name);
+                if (!var) {
+                    fail("assignment to undeclared variable '" +
+                             stmt.target->name + "'",
+                         stmt.line, stmt.col);
+                }
+                var->used = true;
+                if (isArrayType(var->type)) {
+                    fail("cannot assign to whole array '" + stmt.target->name +
+                             "' (assign elements: " + stmt.target->name +
+                             "[i] = ...)",
+                         stmt.line, stmt.col);
+                }
+                if (stmt.compoundOp != TokenType::Eof && !var->assigned) {
+                    fail("variable '" + stmt.target->name +
+                             "' is read before it is definitely assigned",
+                         stmt.line, stmt.col);
+                }
+                targetType = var->type;
+                stmt.target->type = targetType;
+                stmt.target->slot = var->slot;
+                stmt.target->arraySize = var->arraySize;
+                stmt.slot = var->slot;
+            } else if (stmt.target->kind == ExprKind::Index ||
+                       stmt.target->kind == ExprKind::Field) {
+                targetType = checkExpr(*stmt.target);
+            } else {
+                fail("invalid assignment target (expected a variable, an "
+                     "array element or a struct field)",
                      stmt.line, stmt.col);
             }
-            var->used = true;
-            if (isArrayType(var->type)) {
-                fail("cannot assign to whole array '" + stmt.name +
-                         "' (assign elements: " + stmt.name + "[i] = ...)",
-                     stmt.line, stmt.col);
-            }
-            if (stmt.compoundOp != TokenType::Eof && !var->assigned) {
-                fail("variable '" + stmt.name +
-                         "' is read before it is definitely assigned",
-                     stmt.line, stmt.col);
-            }
-            Type valueType = checkExpr(*stmt.expr);
-            requireUsable(*stmt.expr, valueType, "assignment");
+
+            Type valueType = checkExpr(*stmt.value);
+            requireUsable(*stmt.value, valueType, "assignment");
+
+            auto badTarget = [&]() -> std::string {
+                if (stmt.target->kind == ExprKind::Ident) {
+                    return "variable '" + stmt.target->name + "' of type '" +
+                           tyName(targetType) + "'";
+                }
+                if (stmt.target->kind == ExprKind::Index) {
+                    return std::string("array element of type '") +
+                           tyName(targetType) + "'";
+                }
+                return std::string("field '") + stmt.target->name + "' of type '" +
+                       tyName(targetType) + "'";
+            };
+
             if (stmt.compoundOp != TokenType::Eof) {
-                bool bothInt =
-                    var->type == Type::Int && valueType == Type::Int;
+                bool bothInt = targetType == Type::Int && valueType == Type::Int;
                 bool bothFloat =
-                    var->type == Type::Float && valueType == Type::Float;
+                    targetType == Type::Float && valueType == Type::Float;
                 if (!bothInt && !bothFloat) {
-                    if (var->type == Type::Float || valueType == Type::Float) {
+                    if (targetType == Type::Float || valueType == Type::Float) {
                         fail(std::string("'") +
                                  compoundOpText(stmt.compoundOp) +
                                  "' expects floats on both sides (got '" +
-                                 tyName(var->type) + "' and '" +
+                                 tyName(targetType) + "' and '" +
                                  tyName(valueType) + "')",
                              stmt.line, stmt.col);
                     }
                     fail(std::string("'") + compoundOpText(stmt.compoundOp) +
                              "' expects int on both sides (got '" +
-                             tyName(var->type) + "' and '" +
+                             tyName(targetType) + "' and '" +
                              tyName(valueType) + "')",
                          stmt.line, stmt.col);
                 }
-                stmt.declaredType = var->type;  // codegen: int or float op
-                stmt.slot = var->slot;
-                var->assigned = true;
+                stmt.declaredType = targetType;  // codegen: int or float op
+                if (var) var->assigned = true;
                 break;
             }
-            if (valueType != var->type) {
+
+            if (valueType != targetType &&
+                !acceptsNull(targetType, valueType)) {
                 fail(std::string("cannot assign '") + tyName(valueType) +
-                         "' to variable '" + stmt.name + "' of type '" +
-                         tyName(var->type) + "'",
+                         "' to " + badTarget(),
                      stmt.line, stmt.col);
             }
-            stmt.slot = var->slot;
-            var->assigned = true;
+            if (var) var->assigned = true;
             break;
         }
 
-        case StmtKind::AssignIndex: {
-            if (stmt.target == nullptr || stmt.target->kind != ExprKind::Index) {
-                fail("invalid index assignment target", stmt.line, stmt.col);
-            }
-            // checkExpr on the Index node returns the *element* type and
-            // fills lhs->type / slot.
-            Type elemType = checkExpr(*stmt.target);
-            Type baseType = stmt.target->lhs->type;
-            Type valueType = checkExpr(*stmt.value);
-            requireUsable(*stmt.value, valueType, "assignment");
-            if (!isArrayType(baseType)) {
-                fail("cannot index-assign into a non-array value", stmt.line,
-                     stmt.col);
-            }
-            if (stmt.compoundOp != TokenType::Eof) {
-                if (elemType != Type::Int || valueType != Type::Int) {
-                    fail(std::string("'") + compoundOpText(stmt.compoundOp) +
-                             "' expects int on both sides (got '" +
-                             tyName(elemType) + "' and '" +
-                             tyName(valueType) + "')",
-                         stmt.line, stmt.col);
-                }
-                stmt.slot = stmt.target->slot;
-                break;
-            }
-            if (valueType != elemType) {
-                fail(std::string("cannot assign '") + tyName(valueType) +
-                         "' to array element of type '" + tyName(elemType) + "'",
+        case StmtKind::Free: {
+            if (stmt.target == nullptr) {
+                fail("free expects a variable, an array element or a struct "
+                     "field",
                      stmt.line, stmt.col);
             }
-            stmt.slot = stmt.target->slot;
+            Type t = checkExpr(*stmt.target);
+            if (t.kind != Type::Kind::Struct) {
+                fail(std::string("cannot free a value of type '") + tyName(t) +
+                         "' (only structs can be freed)",
+                     stmt.line, stmt.col);
+            }
+            if (stmt.target->kind == ExprKind::Index) {
+                fail("free expects a whole variable, not an array element",
+                     stmt.line, stmt.col);
+            }
             break;
         }
 
@@ -502,7 +566,8 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                     fail("void function cannot return a value", stmt.line,
                          stmt.col);
                 }
-                if (valueType != fnReturn) {
+                if (valueType != fnReturn &&
+                    !acceptsNull(fnReturn, valueType)) {
                     fail(std::string("return type mismatch: expected '") +
                              tyName(fnReturn) + "', got '" +
                              tyName(valueType) + "'",
@@ -514,6 +579,11 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
 
         case StmtKind::ExprStmt: {
             Type t = checkExpr(*stmt.expr);
+            if (t == Type::Null) {
+                fail("'null' has no effect on its own (assign it to a struct "
+                     "variable or use it in == / !=)",
+                     stmt.line, stmt.col);
+            }
             requireUsable(*stmt.expr, t, "expression statement");
             break;
         }
@@ -554,6 +624,15 @@ Type Sema::checkExpr(Expr& expr) {
             return expr.type;
         case ExprKind::Index:
             expr.type = checkIndex(expr);
+            return expr.type;
+        case ExprKind::Field:
+            expr.type = checkField(expr);
+            return expr.type;
+        case ExprKind::New:
+            expr.type = checkNew(expr);
+            return expr.type;
+        case ExprKind::Null:
+            expr.type = Type::Null;
             return expr.type;
         case ExprKind::Unary:
             expr.type = checkUnary(expr);
@@ -624,6 +703,91 @@ Type Sema::checkIndex(Expr& expr) {
     expr.slot = expr.lhs->slot;
     expr.arraySize = expr.lhs->arraySize;
     return base.element();
+}
+
+Type Sema::checkField(Expr& expr) {
+    Type base = checkExpr(*expr.lhs);
+    if (base == Type::Null) {
+        fail(std::string("cannot read field '") + expr.name + "' from 'null'",
+             expr.line, expr.col);
+    }
+    if (base.kind != Type::Kind::Struct) {
+        fail(std::string("cannot access field '") + expr.name +
+                 "' of a value of type '" + tyName(base) + "'",
+             expr.line, expr.col);
+    }
+    const StructDecl& sd = program_->structs[base.id];
+    std::vector<std::string> names;
+    for (size_t i = 0; i < sd.fields.size(); ++i) {
+        if (sd.fields[i].name == expr.name) {
+            expr.fieldOffset = static_cast<int>(i) * 8;
+            return sd.fields[i].type;
+        }
+        names.push_back(sd.fields[i].name);
+    }
+    std::string hint = suggestName(expr.name, names);
+    fail(std::string("struct '") + sd.name + "' has no field '" + expr.name +
+             "'" + (hint.empty() ? "" : " (did you mean '" + hint + "'?)"),
+         expr.line, expr.col);
+}
+
+Type Sema::checkNew(Expr& expr) {
+    if (expr.type.kind != Type::Kind::Struct) {
+        fail("only struct types can be created with 'new'", expr.line, expr.col);
+    }
+    const StructDecl& sd = program_->structs[expr.type.id];
+
+    // Every field exactly once, in any order. Map each initializer to its
+    // declaration slot, then rewrite args/fieldNames into declaration order —
+    // codegen stores them at index * 8.
+    std::vector<int> sourceIndex(sd.fields.size(), -1);
+    for (size_t i = 0; i < expr.fieldNames.size(); ++i) {
+        int found = -1;
+        for (size_t f = 0; f < sd.fields.size(); ++f) {
+            if (sd.fields[f].name == expr.fieldNames[i]) {
+                found = static_cast<int>(f);
+                break;
+            }
+        }
+        if (found < 0) {
+            fail(std::string("struct '") + sd.name + "' has no field '" +
+                     expr.fieldNames[i] + "'",
+                 expr.args[i]->line, expr.args[i]->col);
+        }
+        if (sourceIndex[found] >= 0) {
+            fail(std::string("field '") + sd.fields[found].name +
+                     "' is initialized twice",
+                 expr.args[i]->line, expr.args[i]->col);
+        }
+        sourceIndex[found] = static_cast<int>(i);
+    }
+
+    std::vector<ExprPtr> ordered(sd.fields.size());
+    std::vector<std::string> orderedNames(sd.fields.size());
+    for (size_t f = 0; f < sd.fields.size(); ++f) {
+        if (sourceIndex[f] < 0) {
+            fail(std::string("missing field '") + sd.fields[f].name +
+                     "' in the initializer of '" + sd.name + "'",
+                 expr.line, expr.col);
+        }
+        int i = sourceIndex[f];
+        const int line = expr.args[i]->line;
+        const int col = expr.args[i]->col;
+        Type valueType = checkExpr(*expr.args[i]);
+        requireUsable(*expr.args[i], valueType, "struct field value");
+        if (valueType != sd.fields[f].type &&
+            !acceptsNull(sd.fields[f].type, valueType)) {
+            fail(std::string("field '") + sd.fields[f].name + "' of '" +
+                     sd.name + "': expected '" + tyName(sd.fields[f].type) +
+                     "', got '" + tyName(valueType) + "'",
+                 line, col);
+        }
+        ordered[f] = std::move(expr.args[i]);
+        orderedNames[f] = sd.fields[f].name;
+    }
+    expr.args = std::move(ordered);
+    expr.fieldNames = std::move(orderedNames);
+    return expr.type;
 }
 
 Type Sema::checkUnary(Expr& expr) {
@@ -704,6 +868,20 @@ Type Sema::checkBinary(Expr& expr) {
             return Type::Bool;
         case TokenType::EqEq:
         case TokenType::NotEq:
+            if (left == Type::Null || right == Type::Null) {
+                const Type& other = left == Type::Null ? right : left;
+                if (other == Type::Null ||
+                    other.kind == Type::Kind::Struct) {
+                    return Type::Bool;  // pointer comparison against null
+                }
+                fail(std::string("cannot compare '") + tyName(other) +
+                         "' with 'null' (only structs can be null)",
+                     expr.line, expr.col);
+            }
+            if (left.kind == Type::Kind::Struct ||
+                right.kind == Type::Kind::Struct) {
+                fail("cannot compare structs with == / !=", expr.line, expr.col);
+            }
             if (left == Type::Float || right == Type::Float) {
                 if (left != right) {
                     fail(std::string("cannot compare '") + tyName(left) +
@@ -810,7 +988,8 @@ Type Sema::checkCall(Expr& expr) {
                 } else {
                     requireUsable(*expr.args[a], argType, "argument");
                 }
-                if (argType != info.paramTypes[a]) {
+                if (argType != info.paramTypes[a] &&
+                    !acceptsNull(info.paramTypes[a], argType)) {
                     fail("argument " + std::to_string(a + 1) + " of '" +
                              expr.name + "': expected '" +
                              tyName(info.paramTypes[a]) + "', got '" +

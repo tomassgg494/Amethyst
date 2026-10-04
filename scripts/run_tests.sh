@@ -276,6 +276,25 @@ expected_slices="150
 3"
 check "slices output" "$expected_slices" "$out"
 
+# structs on the heap: new / fields / null / free
+$BIN -o build/structs examples/structs.amt
+set +e
+out=$(./build/structs)
+rc=$?
+set -e
+expected_structs="10
+2.5
+centro
+25
+30
+0
+0
+12
+5
+1"
+check "structs output" "$expected_structs" "$out"
+check "structs exit" "0" "$rc"
+
 # slice ABI: >6 integer args, and a slice mixed with scalars
 cat > build/abi.amt <<'EOF'
 fn seven(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> int {
@@ -483,6 +502,30 @@ expect_divzero "runtime /= by zero" "    var n = 10;
     n /= z;
     print(n);"
 
+# runtime null reference (reading a field of a null object) → exit 1 + message
+cat > build/nullref.amt <<'EOF'
+struct Point { x: int }
+
+fn main() -> int {
+    var p: Point = null;
+    print(p.x);
+    return 0;
+}
+EOF
+$BIN -o build/nullref build/nullref.amt
+set +e
+err=$(./build/nullref 2>&1)
+rc=$?
+set -e
+if [[ $rc -eq 1 && "$err" == *"null reference"* ]]; then
+  PASS=$((PASS + 1))
+  echo "  PASS  runtime null reference"
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL  runtime null reference (rc=$rc)"
+  echo "        err: $err"
+fi
+
 echo "== error cases =="
 
 expect_fail() {
@@ -539,6 +582,19 @@ expect_fail "unassigned after a loop" tests/err_uninit_loop.amt "variable 'x' is
 expect_fail "compound on unassigned var" tests/err_uninit_compound.amt "variable 'x' is read before it is definitely assigned"
 expect_fail "var without a type" tests/err_uninit_infer.amt "needs an initializer when the type is omitted"
 expect_fail "uninitialized array" tests/err_uninit_array.amt "array variables must be initialized"
+expect_fail "null initializer" tests/err_struct_infer_null.amt "cannot infer type of 'q' from this initializer"
+expect_fail "unknown struct field" tests/err_struct_field.amt "has no field 'xx' (did you mean 'x'?)"
+expect_fail "missing struct field" tests/err_struct_missing.amt "missing field 'y' in the initializer of 'Point'"
+expect_fail "duplicate struct field" tests/err_struct_dup.amt "field 'x' is initialized twice"
+expect_fail "field not declared" tests/err_struct_nofield.amt "struct 'Point' has no field 'z'"
+expect_fail "wrong field type" tests/err_struct_field_type.amt "field 'x' of 'Point': expected 'int', got 'string'"
+expect_fail "print a struct" tests/err_struct_print.amt "print expects int, bool, float or string, got 'Point'"
+expect_fail "compare structs" tests/err_struct_cmp.amt "cannot compare structs with == / !="
+expect_fail "free an int" tests/err_free_nonstruct.amt "cannot free a value of type 'int'"
+expect_fail "array struct field" tests/err_struct_array_field.amt "array fields are not supported yet"
+expect_fail "unknown type" tests/err_unknown_type.amt "unknown type 'Foo'"
+expect_fail "field on null literal" tests/err_null_field.amt "cannot read field 'x' from 'null'"
+expect_fail "field of unassigned struct" tests/err_struct_uninit.amt "variable 'p' is read before it is definitely assigned"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

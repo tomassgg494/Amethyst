@@ -22,6 +22,8 @@ private:
     void emitBoundsCheck(const Expr& indexExpr);  // index in %rax on entry
     void emitArrayBase(const Expr& arr, const std::string& reg);
     void emitArrayLength(const Expr& arr);        // result in %rax
+    void emitAddr(const Expr& lvalue);            // address of an lvalue → %rax
+    void emitNullCheck(int line, const std::string& what);  // ptr in %rax
     void emitDivGuard();                          // %rcx is the divisor; aborts if 0
     void emitIntOp(TokenType op);                 // lhs %rax, rhs %rcx → result %rax
     void emitFloatOp(TokenType op);               // lhs %xmm0, rhs %xmm1 → xmm0
@@ -38,6 +40,7 @@ private:
     Type currentReturn_ = Type::Void;  // return type of the function being emitted
     std::vector<std::pair<std::string, std::string>> strings_;  // label, content
     std::vector<std::pair<std::string, double>> floats_;        // label, value
+    const Program* program_ = nullptr;  // valid for the current emit()
 
     // loop stack: {continueLabel, breakLabel}
     std::vector<std::pair<std::string, std::string>> loopStack_;

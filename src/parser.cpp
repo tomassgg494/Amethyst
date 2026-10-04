@@ -55,12 +55,19 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
         return Type::Str;
     } else if (allowVoid && match(TokenType::KwVoid)) {
         return Type::Void;
+    } else if (check(TokenType::Ident)) {
+        const Token& tok = advance();
+        auto it = structIds_.find(tok.text);
+        if (it == structIds_.end()) {
+            failAt(tok, "unknown type '" + tok.text + "'");
+        }
+        base = Type::structOf(it->second);
     } else {
         fail("expected type (int, bool, float, string" +
-             std::string(allowVoid ? ", void" : "") + ")");
+             std::string(allowVoid ? ", void" : "") + ", or a struct name)");
     }
 
-    // slice parameter type: int[] / bool[]
+    // slice parameter type: int[] / bool[] / Point[]
     if (allowSlice && match(TokenType::LBracket)) {
         if (check(TokenType::IntLit)) {
             fail("array parameters must be written as 'int[]' or 'bool[]' "
@@ -70,6 +77,52 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
         return Type::arrayOf(base);
     }
     return base;
+}
+
+void Parser::collectStructNames(const std::vector<Token>& tokens) {
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].type != TokenType::KwStruct) continue;
+        if (i + 1 >= tokens.size() || tokens[i + 1].type != TokenType::Ident) {
+            failAt(tokens[i], "expected struct name after 'struct'");
+        }
+        const Token& nameTok = tokens[i + 1];
+        if (structIds_.count(nameTok.text)) {
+            failAt(nameTok, "redefinition of struct '" + nameTok.text + "'");
+        }
+        structIds_[nameTok.text] = static_cast<int>(prog_->structs.size());
+        prog_->structs.push_back(
+            StructDecl{nameTok.text, {}, nameTok.line, nameTok.col, 0});
+    }
+}
+
+void Parser::parseStruct() {
+    // 'struct' already consumed; the name was registered by collectStructNames.
+    const Token& nameTok = expect(TokenType::Ident, "struct name");
+    const std::string& structName = nameTok.text;
+    StructDecl& decl = prog_->structs[structIds_.at(structName)];
+
+    expect(TokenType::LBrace, "'{' after struct name");
+    if (check(TokenType::RBrace)) {
+        failAt(nameTok, "struct '" + structName + "' must declare at least one field");
+    }
+    do {
+        const Token& fieldTok = expect(TokenType::Ident, "field name");
+        expect(TokenType::Colon, "':' after field name");
+        Type fieldType = parseType(false);
+        if (check(TokenType::LBracket)) {
+            fail("array fields are not supported yet (struct '" + structName +
+                 "'); store an index and keep the data separately");
+        }
+        for (const auto& f : decl.fields) {
+            if (f.name == fieldTok.text) {
+                failAt(fieldTok, "duplicate field '" + fieldTok.text +
+                                     "' in struct '" + structName + "'");
+            }
+        }
+        decl.fields.push_back(
+            StructField{fieldTok.text, fieldType, fieldTok.line, fieldTok.col});
+    } while (match(TokenType::Comma) && !check(TokenType::RBrace));
+    expect(TokenType::RBrace, "'}' to close struct declaration");
 }
 
 std::vector<Param> Parser::parseParams() {
@@ -115,12 +168,19 @@ FnDecl Parser::parseFunction() {
 
 Program Parser::parseProgram() {
     Program prog;
+    prog_ = &prog;
+    collectStructNames(tokens_);
     while (!check(TokenType::Eof)) {
-        if (!check(TokenType::KwFn)) {
-            fail("expected function declaration ('fn')");
+        if (match(TokenType::KwStruct)) {
+            parseStruct();
+        } else if (check(TokenType::KwFn)) {
+            prog.functions.push_back(parseFunction());
+        } else {
+            fail("expected function or struct declaration ('fn' or 'struct')");
         }
-        prog.functions.push_back(parseFunction());
     }
+    prog_ = nullptr;
+    structIds_.clear();
     return prog;
 }
 
@@ -247,45 +307,30 @@ StmtPtr Parser::parsePrint() {
     return Stmt::makePrint(std::move(value), kw.line, kw.col);
 }
 
+StmtPtr Parser::parseFree() {
+    const Token& kw = expect(TokenType::KwFree, "'free'");
+    expect(TokenType::LParen, "'(' after 'free'");
+    ExprPtr target = parseExpression();
+    expect(TokenType::RParen, "')' after the value to free");
+    expect(TokenType::Semicolon, "';' after free");
+    return Stmt::makeFree(std::move(target), kw.line, kw.col);
+}
+
 StmtPtr Parser::parseAssignOrExprStmt() {
-    if (check(TokenType::Ident) && isAssignOp(peek(1).type)) {
-        const Token& nameTok = advance();
-        const TokenType op = advance().type;  // '=' or compound operator
+    ExprPtr target = parseExpression();
+
+    if (isAssignOp(peek().type)) {
+        const TokenType op = advance().type;
+        const int line = target->line;
+        const int col = target->col;
         ExprPtr value = parseExpression();
         expect(TokenType::Semicolon, "';' after assignment");
-        return Stmt::makeAssign(nameTok.text, std::move(value), nameTok.line,
-                                nameTok.col,
+        return Stmt::makeAssign(std::move(target), std::move(value), line, col,
                                 op == TokenType::Assign ? TokenType::Eof : op);
     }
 
-    // arr[i] = value;  /  arr[i] += value;
-    if (check(TokenType::Ident) && peek(1).type == TokenType::LBracket) {
-        // Peek ahead: Ident '[' ... ']' <assign-op>  → index assignment
-        size_t save = pos_;
-        const Token& nameTok = advance();  // ident
-        advance();                          // '['
-        // parse index expression from current position
-        ExprPtr index = parseExpression();
-        expect(TokenType::RBracket, "']' after index");
-        if (isAssignOp(peek().type)) {
-            const TokenType raw = advance().type;
-            const TokenType op =
-                raw == TokenType::Assign ? TokenType::Eof : raw;
-            ExprPtr base = Expr::makeIdent(nameTok.text, nameTok.line, nameTok.col);
-            ExprPtr target =
-                Expr::makeIndex(std::move(base), std::move(index), nameTok.line, nameTok.col);
-            ExprPtr value = parseExpression();
-            expect(TokenType::Semicolon, "';' after assignment");
-            return Stmt::makeAssignIndex(std::move(target), std::move(value),
-                                         nameTok.line, nameTok.col, op);
-        }
-        // Not an assignment: rewind and parse as expression statement.
-        pos_ = save;
-    }
-
-    ExprPtr expr = parseExpression();
     const Token& semi = expect(TokenType::Semicolon, "';' after expression");
-    return Stmt::makeExprStmt(std::move(expr), semi.line, semi.col);
+    return Stmt::makeExprStmt(std::move(target), semi.line, semi.col);
 }
 
 StmtPtr Parser::parseStatement() {
@@ -296,6 +341,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenType::KwFor)) return parseFor();
     if (check(TokenType::KwReturn)) return parseReturn();
     if (check(TokenType::KwPrint)) return parsePrint();
+    if (check(TokenType::KwFree)) return parseFree();
     if (check(TokenType::KwBreak)) {
         const Token& t = advance();
         expect(TokenType::Semicolon, "';' after break");
@@ -396,14 +442,53 @@ ExprPtr Parser::parseUnary() {
 
 ExprPtr Parser::parsePostfix() {
     ExprPtr expr = parsePrimary();
-    while (check(TokenType::LBracket)) {
-        int line = peek().line;
-        int col = peek().col;
-        advance();  // '['
-        ExprPtr index = parseExpression();
-        expect(TokenType::RBracket, "']' after index expression");
-        expr = Expr::makeIndex(std::move(expr), std::move(index), line, col);
+    for (;;) {
+        if (check(TokenType::LBracket)) {
+            int line = peek().line;
+            int col = peek().col;
+            advance();  // '['
+            ExprPtr index = parseExpression();
+            expect(TokenType::RBracket, "']' after index expression");
+            expr = Expr::makeIndex(std::move(expr), std::move(index), line, col);
+            continue;
+        }
+        if (check(TokenType::Dot)) {
+            advance();  // '.'
+            const Token& fieldTok = expect(TokenType::Ident, "field name after '.'");
+            expr = Expr::makeField(std::move(expr), fieldTok.text, fieldTok.line,
+                                   fieldTok.col);
+            continue;
+        }
+        break;
     }
+    return expr;
+}
+
+ExprPtr Parser::parseNew() {
+    const Token& kw = expect(TokenType::KwNew, "'new'");
+    Type ty = parseType(false);
+    if (ty.kind != Type::Kind::Struct) {
+        failAt(kw, std::string("cannot allocate a value of type '") +
+                       typeName(ty, prog_->structs) +
+                       "' with 'new' (only struct types can be created with 'new')");
+    }
+    const std::string tyName = typeName(ty, prog_->structs);
+    expect(TokenType::LBrace, "'{' after 'new " + tyName + "'");
+
+    std::vector<ExprPtr> fields;
+    std::vector<std::string> names;
+    if (!check(TokenType::RBrace)) {
+        do {
+            const Token& fieldTok = expect(TokenType::Ident, "field name");
+            expect(TokenType::Colon, "':' after field name in 'new'");
+            fields.push_back(parseExpression());
+            names.push_back(fieldTok.text);
+        } while (match(TokenType::Comma) && !check(TokenType::RBrace));
+    }
+    expect(TokenType::RBrace, "'}' to close the 'new' initializer");
+
+    ExprPtr expr = Expr::makeNew(ty, std::move(fields), kw.line, kw.col);
+    expr->fieldNames = std::move(names);
     return expr;
 }
 
@@ -426,6 +511,13 @@ ExprPtr Parser::parsePrimary() {
         }
         expect(TokenType::RParen, "')' after arguments");
         return Expr::makeCall(kw.text, std::move(args), kw.line, kw.col);
+    }
+    if (check(TokenType::KwNull)) {
+        const Token& tok = advance();
+        return Expr::makeNull(tok.line, tok.col);
+    }
+    if (check(TokenType::KwNew)) {
+        return parseNew();
     }
     if (check(TokenType::FloatLit)) {
         const Token& tok = advance();

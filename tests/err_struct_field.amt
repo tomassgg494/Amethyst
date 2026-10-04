@@ -1,0 +1,7 @@
+struct Point { x: int, y: int }
+
+fn main() -> int {
+    var p = new Point { x: 1, y: 2 };
+    print(p.xx);
+    return 0;
+}

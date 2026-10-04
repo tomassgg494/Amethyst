@@ -21,6 +21,7 @@ int Codegen::slotOffset(int slot) const {
 
 std::string Codegen::emit(const Program& program) {
     out_.clear();
+    program_ = &program;
     labelCounter_ = 0;
     stackDepth_ = 0;
     strCounter_ = 0;
@@ -40,6 +41,10 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    .string \"Amethyst runtime error: index %ld out of bounds for array of size %ld\\n\"\n";
     out_ += ".fmt_divzero:\n";
     out_ += "    .string \"Amethyst runtime error: division by zero\\n\"\n";
+    out_ += ".fmt_null:\n";
+    out_ += "    .string \"Amethyst runtime error: null reference (%s at line %ld)\\n\"\n";
+    out_ += ".fmt_oom:\n";
+    out_ += "    .string \"Amethyst runtime error: out of memory\\n\"\n";
     out_ += ".text\n";
 
     // shared bounds-failure handler (never returns)
@@ -67,6 +72,33 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    movl $1, %edi\n";
     out_ += "    call exit@PLT\n";
     out_ += ".size __amethyst_div_fail, .-__amethyst_div_fail\n";
+
+    // shared null-reference handler (never returns)
+    // entry: %rdi = description ("field 'x'"), %rsi = source line
+    out_ += ".globl __amethyst_null_fail\n";
+    out_ += ".type __amethyst_null_fail, @function\n";
+    out_ += "__amethyst_null_fail:\n";
+    out_ += "    subq $8, %rsp\n";            // entry rsp ≡ 8 (mod 16) → align for printf
+    out_ += "    movq %rsi, %rdx\n";          // rdx = line
+    out_ += "    movq %rdi, %rsi\n";          // rsi = description
+    out_ += "    leaq .fmt_null(%rip), %rdi\n";
+    out_ += "    xorl %eax, %eax\n";
+    out_ += "    call printf@PLT\n";
+    out_ += "    movl $1, %edi\n";
+    out_ += "    call exit@PLT\n";
+    out_ += ".size __amethyst_null_fail, .-__amethyst_null_fail\n";
+
+    // shared out-of-memory handler (never returns)
+    out_ += ".globl __amethyst_oom_fail\n";
+    out_ += ".type __amethyst_oom_fail, @function\n";
+    out_ += "__amethyst_oom_fail:\n";
+    out_ += "    subq $8, %rsp\n";            // entry rsp ≡ 8 (mod 16) → align for printf
+    out_ += "    leaq .fmt_oom(%rip), %rdi\n";
+    out_ += "    xorl %eax, %eax\n";
+    out_ += "    call printf@PLT\n";
+    out_ += "    movl $1, %edi\n";
+    out_ += "    call exit@PLT\n";
+    out_ += ".size __amethyst_oom_fail, .-__amethyst_oom_fail\n";
 
     for (const auto& fn : program.functions) {
         emitFunction(fn, program);
@@ -217,6 +249,53 @@ void Codegen::emitArrayLength(const Expr& arr) {
     }
 }
 
+void Codegen::emitAddr(const Expr& lvalue) {
+    // result in %rax; %rcx is clobbered
+    switch (lvalue.kind) {
+        case ExprKind::Ident:
+            out_ += "    leaq " + std::to_string(slotOffset(lvalue.slot)) +
+                    "(%rbp), %rax\n";
+            break;
+
+        case ExprKind::Field: {
+            // the base can be any expression that yields an object pointer
+            // (a variable, an element, a nested field or a call result)
+            emitExpr(*lvalue.lhs);
+            emitNullCheck(lvalue.line, "field '" + lvalue.name + "'");
+            out_ += "    addq $" + std::to_string(lvalue.fieldOffset) +
+                    ", %rax\n";
+            break;
+        }
+
+        case ExprKind::Index: {
+            emitExpr(*lvalue.rhs);  // index → %rax
+            emitBoundsCheck(lvalue);
+            out_ += "    shlq $3, %rax\n";
+            emitArrayBase(lvalue, "%rcx");
+            out_ += "    subq %rax, %rcx\n";
+            out_ += "    movq %rcx, %rax\n";
+            break;
+        }
+
+        default:
+            out_ += "    # invalid assignment target\n";
+            break;
+    }
+}
+
+void Codegen::emitNullCheck(int line, const std::string& what) {
+    // pointer in %rax
+    std::string okL = newLabel("not_null");
+    out_ += "    testq %rax, %rax\n";
+    out_ += "    jne " + okL + "\n";
+    std::string label = ".Lnull_" + std::to_string(strCounter_++);
+    strings_.push_back({label, what});
+    out_ += "    leaq " + label + "(%rip), %rdi\n";
+    out_ += "    movq $" + std::to_string(line) + ", %rsi\n";
+    emitAlignedCall("__amethyst_null_fail");  // never returns
+    out_ += okL + ":\n";
+}
+
 void Codegen::emitAlignedCall(const std::string& target) {
     // rsp must be 16-byte aligned at the call. Park it in %rbx, which is
     // callee-saved and therefore still valid after the call (unlike %r11),
@@ -332,57 +411,47 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
         }
 
         case StmtKind::Assign: {
+            // the value is evaluated first (as before for `arr[i] = ...`),
+            // then the address of the target is computed
+            emitExpr(*stmt.value);
+            out_ += "    pushq %rax\n";
+            stackDepth_++;
+            emitAddr(*stmt.target);  // %rax = &target
+            out_ += "    movq %rax, %rcx\n";
+
             if (stmt.compoundOp != TokenType::Eof) {
-                // evaluate rhs, stash it, load lhs, combine, store
-                emitExpr(*stmt.expr);
-                out_ += "    pushq %rax\n";
+                // stack: [rhs]; rcx = &target
+                out_ += "    pushq %rcx\n";
                 stackDepth_++;
-                out_ += "    movq " +
-                        std::to_string(slotOffset(stmt.slot)) + "(%rbp), %rax\n";
-                out_ += "    popq %rcx\n";
-                stackDepth_--;
+                out_ += "    movq (%rcx), %rax\n";   // old value
+                out_ += "    movq 8(%rsp), %rcx\n";  // saved rhs
                 if (stmt.declaredType == Type::Float) {
                     emitFloatOp(stmt.compoundOp);
                 } else {
                     emitIntOp(stmt.compoundOp);
                 }
-                out_ += "    movq %rax, " +
-                        std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
+                out_ += "    popq %rcx\n";
+                stackDepth_--;
+                out_ += "    movq %rax, (%rcx)\n";
+                out_ += "    addq $8, %rsp\n";  // drop saved rhs
+                stackDepth_--;
                 break;
             }
-            emitExpr(*stmt.expr);
-            out_ += "    movq %rax, " +
-                    std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
+            out_ += "    popq %rax\n";
+            stackDepth_--;
+            out_ += "    movq %rax, (%rcx)\n";
             break;
         }
 
-        case StmtKind::AssignIndex: {
-            // value first (saved on stack), then index + bounds + address
-            emitExpr(*stmt.value);
+        case StmtKind::Free: {
+            emitAddr(*stmt.target);  // %rax = &lvalue
             out_ += "    pushq %rax\n";
             stackDepth_++;
-            emitExpr(*stmt.target->rhs);  // index
-            emitBoundsCheck(*stmt.target);
-            out_ += "    shlq $3, %rax\n";  // index * 8
-            emitArrayBase(*stmt.target, "%rcx");
-            out_ += "    subq %rax, %rcx\n";  // rcx = &elem
-            if (stmt.compoundOp != TokenType::Eof) {
-                // stack: [rhs, &elem]; read old, combine with rhs, write back
-                out_ += "    pushq %rcx\n";
-                stackDepth_++;
-                out_ += "    movq (%rcx), %rax\n";    // old value
-                out_ += "    movq 8(%rsp), %rcx\n";   // rhs
-                emitIntOp(stmt.compoundOp);
-                out_ += "    popq %rcx\n";            // &elem
-                stackDepth_--;
-                out_ += "    movq %rax, (%rcx)\n";
-                out_ += "    addq $8, %rsp\n";        // drop saved rhs
-                stackDepth_--;
-                break;
-            }
-            out_ += "    popq %rax\n";        // value
+            out_ += "    movq (%rax), %rdi\n";
+            emitAlignedCall("free");
+            out_ += "    popq %rax\n";
             stackDepth_--;
-            out_ += "    movq %rax, (%rcx)\n";
+            out_ += "    movq $0, (%rax)\n";  // the variable is now null
             break;
         }
 
@@ -550,6 +619,48 @@ void Codegen::emitExpr(const Expr& expr) {
             emitArrayBase(expr, "%rcx");
             out_ += "    subq %rax, %rcx\n";
             out_ += "    movq (%rcx), %rax\n";
+            break;
+        }
+
+        case ExprKind::Null:
+            out_ += "    movq $0, %rax\n";
+            break;
+
+        case ExprKind::Field:
+            emitAddr(expr);
+            out_ += "    movq (%rax), %rax\n";
+            break;
+
+        case ExprKind::New: {
+            // a struct is one heap block, one 8-byte slot per field
+            const StructDecl& sd = program_->structs[expr.type.id];
+            int bytes = sd.sizeBytes;
+            if (bytes == 0) bytes = static_cast<int>(sd.fields.size()) * 8;
+
+            for (const auto& field : expr.args) {
+                emitExpr(*field);
+                out_ += "    pushq %rax\n";
+                stackDepth_++;
+            }
+            out_ += "    movq $" + std::to_string(bytes) + ", %rdi\n";
+            emitAlignedCall("malloc");
+
+            std::string okL = newLabel("alloc_ok");
+            out_ += "    testq %rax, %rax\n";
+            out_ += "    jne " + okL + "\n";
+            emitAlignedCall("__amethyst_oom_fail");
+            out_ += okL + ":\n";
+
+            // %r11 = object; the field values come back off the stack in
+            // reverse (sema wrote them in declaration order)
+            out_ += "    movq %rax, %r11\n";
+            for (int i = static_cast<int>(expr.args.size()) - 1; i >= 0; --i) {
+                out_ += "    popq %rax\n";
+                stackDepth_--;
+                out_ += "    movq %rax, " + std::to_string(i * 8) +
+                        "(%r11)\n";
+            }
+            out_ += "    movq %r11, %rax\n";
             break;
         }
 

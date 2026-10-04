@@ -20,6 +20,7 @@ struct Type {
         Error,   // error-recovery sentinel; never reported to the user
         Array,   // int[N] / bool[N] / Point[] — the length lives on the declaration
         Struct,  // heap-allocated record
+        Null,    // the `null` literal; only struct-typed slots accept it
     };
 
     Kind kind = Kind::Error;
@@ -31,6 +32,7 @@ struct Type {
     static const Type Float;
     static const Type Void;
     static const Type Str;
+    static const Type Null;
     static const Type Error;
 
     static Type arrayOf(const Type& elem) {
@@ -60,6 +62,7 @@ inline const Type Type::Bool{Type::Kind::Bool};
 inline const Type Type::Float{Type::Kind::Float};
 inline const Type Type::Void{Type::Kind::Void};
 inline const Type Type::Str{Type::Kind::Str};
+inline const Type Type::Null{Type::Kind::Null};
 inline const Type Type::Error{Type::Kind::Error};
 
 struct StructField {
@@ -86,6 +89,7 @@ inline std::string typeName(const Type& t,
         case Type::Kind::Float: return "float";
         case Type::Kind::Void: return "void";
         case Type::Kind::Str: return "string";
+        case Type::Kind::Null: return "null";
         case Type::Kind::Error: return "<error>";
         case Type::Kind::Array:
             return typeName(t.element(), structs) + "[]";
@@ -113,12 +117,15 @@ enum class ExprKind {
     FloatLit,
     BoolLit,
     StrLit,
+    Null,
     ArrayLit,
     Ident,
     Index,
+    Field,   // obj.field
     Unary,
     Binary,
     Call,
+    New,     // new Point { ... }
 };
 
 struct Expr {
@@ -146,15 +153,19 @@ struct Expr {
     std::string name;
 
     // Unary: lhs; Binary: lhs, rhs; Call: args;
-    // ArrayLit: args (elements); Index: lhs (array), rhs (index expr)
+    // ArrayLit: args (elements); Index: lhs (array), rhs (index expr);
+    // Field: lhs (object), name (field); New: args (field values) with
+    // fieldNames parallel to them (declaration order after sema).
     ExprPtr lhs;
     ExprPtr rhs;
     std::vector<ExprPtr> args;
+    std::vector<std::string> fieldNames;  // New only
 
     // Sema results.
     int slot = -1;         // Ident / Index base: frame slot
     int fnIndex = -1;      // Call: index into Program::functions
     int arraySize = 0;     // Array literal / array Ident / Index: element count
+    int fieldOffset = -1;  // Field: byte offset inside the struct object
 
     static ExprPtr makeInt(long long v, int line, int col) {
         auto e = std::make_unique<Expr>();
@@ -213,6 +224,31 @@ struct Expr {
         e->col = col;
         return e;
     }
+    static ExprPtr makeNull(int line, int col) {
+        auto e = std::make_unique<Expr>();
+        e->kind = ExprKind::Null;
+        e->line = line;
+        e->col = col;
+        return e;
+    }
+    static ExprPtr makeField(ExprPtr object, std::string name, int line, int col) {
+        auto e = std::make_unique<Expr>();
+        e->kind = ExprKind::Field;
+        e->lhs = std::move(object);
+        e->name = std::move(name);
+        e->line = line;
+        e->col = col;
+        return e;
+    }
+    static ExprPtr makeNew(Type type, std::vector<ExprPtr> fields, int line, int col) {
+        auto e = std::make_unique<Expr>();
+        e->kind = ExprKind::New;
+        e->type = type;
+        e->args = std::move(fields);
+        e->line = line;
+        e->col = col;
+        return e;
+    }
     static ExprPtr makeUnary(TokenType op, ExprPtr operand, int line, int col) {
         auto e = std::make_unique<Expr>();
         e->kind = ExprKind::Unary;
@@ -245,8 +281,7 @@ struct Expr {
 
 enum class StmtKind {
     VarDecl,
-    Assign,
-    AssignIndex,  // arr[i] = value
+    Assign,   // target is an lvalue expression: Ident, Index or Field chain
     If,
     While,
     For,
@@ -255,6 +290,7 @@ enum class StmtKind {
     Return,
     ExprStmt,
     Print,
+    Free,
     Block,
 };
 
@@ -263,16 +299,16 @@ struct Stmt {
     int line = 0;
     int col = 0;
 
-    // VarDecl / Assign / AssignIndex
+    // VarDecl / Assign
     std::string name;
     Type declaredType = Type::Void;  // VarDecl: written type; Assign(compound): operand type
     int declaredSize = 0;            // VarDecl arrays: N in int[N]
     bool typeInferred = false;       // VarDecl: written as `var x = e`
 
-    // Assign / AssignIndex: Eof for plain '=', otherwise the compound operator
+    // Assign: Eof for plain '=', otherwise the compound operator
     TokenType compoundOp = TokenType::Eof;
 
-    // VarDecl / Assign / Return / ExprStmt / Print / If-cond / While-cond /
+    // VarDecl / Return / ExprStmt / Print / If-cond / While-cond /
     // For range start (expr) and end (exprEnd)
     ExprPtr expr;
     ExprPtr exprEnd;
@@ -283,15 +319,16 @@ struct Stmt {
     int endSlot = -1;   // hidden slot holding range end value
     int stepSlot = -1;  // unused in v1.1 (step is always +1)
 
-    // AssignIndex: arr and index
-    ExprPtr target;   // Index expr (lhs=arr ident, rhs=index)
-    ExprPtr value;    // value assigned
+    // Assign: the lvalue (Ident / Index / Field chain) and the value;
+    // Free: the lvalue to release
+    ExprPtr target;
+    ExprPtr value;
 
     // If / While / For / Block / ExprStmt-side structures
     StmtPtr thenBlock;  // If: then-branch; While/For: body
     StmtPtr elseBlock;  // If: else-branch, may be null
 
-    // VarDecl / Assign / AssignIndex: filled by sema
+    // VarDecl / Assign: filled by sema
     int slot = -1;
 
     // Block
@@ -307,24 +344,21 @@ struct Stmt {
         s->col = col;
         return s;
     }
-    static StmtPtr makeAssign(std::string name, ExprPtr value, int line, int col,
+    static StmtPtr makeAssign(ExprPtr target, ExprPtr value, int line, int col,
                               TokenType compoundOp = TokenType::Eof) {
         auto s = std::make_unique<Stmt>();
         s->kind = StmtKind::Assign;
-        s->name = std::move(name);
-        s->expr = std::move(value);
+        s->target = std::move(target);
+        s->value = std::move(value);
         s->compoundOp = compoundOp;
         s->line = line;
         s->col = col;
         return s;
     }
-    static StmtPtr makeAssignIndex(ExprPtr target, ExprPtr value, int line, int col,
-                                   TokenType compoundOp = TokenType::Eof) {
+    static StmtPtr makeFree(ExprPtr target, int line, int col) {
         auto s = std::make_unique<Stmt>();
-        s->kind = StmtKind::AssignIndex;
+        s->kind = StmtKind::Free;
         s->target = std::move(target);
-        s->value = std::move(value);
-        s->compoundOp = compoundOp;
         s->line = line;
         s->col = col;
         return s;

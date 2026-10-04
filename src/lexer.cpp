@@ -26,6 +26,10 @@ const std::unordered_map<std::string, TokenType>& keywords() {
         {"continue", TokenType::KwContinue},
         {"for", TokenType::KwFor},
         {"in", TokenType::KwIn},
+        {"struct", TokenType::KwStruct},
+        {"new", TokenType::KwNew},
+        {"free", TokenType::KwFree},
+        {"null", TokenType::KwNull},
     };
     return kw;
 }
@@ -318,7 +322,7 @@ std::vector<Token> Lexer::tokenize() {
                 if (match('.')) {
                     tokens.push_back(make(TokenType::DotDot, "..", line, col));
                 } else {
-                    fail("unexpected character '.' (did you mean '..'?)");
+                    tokens.push_back(make(TokenType::Dot, ".", line, col));
                 }
                 break;
             case '[':

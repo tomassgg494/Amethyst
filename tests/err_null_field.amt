@@ -1,0 +1,6 @@
+struct Point { x: int }
+
+fn main() -> int {
+    print(null.x);
+    return 0;
+}

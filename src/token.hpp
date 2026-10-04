@@ -25,6 +25,10 @@ enum class TokenType {
     KwContinue,
     KwFor,
     KwIn,
+    KwStruct,
+    KwNew,
+    KwFree,
+    KwNull,
 
     StrLit,
 
@@ -62,6 +66,7 @@ enum class TokenType {
     Semicolon,
     Colon,
     Arrow,
+    Dot,
 
     Eof,
 };

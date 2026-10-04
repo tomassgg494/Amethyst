@@ -76,6 +76,8 @@ private:
     Type checkCall(Expr& expr);
     Type checkIdent(Expr& expr);
     Type checkIndex(Expr& expr);
+    Type checkField(Expr& expr);
+    Type checkNew(Expr& expr);
     Type checkArrayLit(Expr& expr);
 
     // Display name of a type, with the program's struct table behind it.
