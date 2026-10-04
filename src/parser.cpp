@@ -176,8 +176,17 @@ StmtPtr Parser::parseVarDecl() {
         ty = Type::Error;  // sema fills from initializer
     }
 
-    expect(TokenType::Assign, "'=' in variable declaration");
-    ExprPtr init = parseExpression();
+    ExprPtr init;
+    if (match(TokenType::Assign)) {
+        init = parseExpression();
+    } else if (inferred) {
+        failAt(nameTok,
+               "variable declaration needs an initializer when the type is "
+               "omitted");
+    } else if (isArrayType(ty)) {
+        failAt(nameTok,
+               "array variables must be initialized, e.g. 'int[3] = [1, 2, 3]'");
+    }
     expect(TokenType::Semicolon, "';' after variable declaration");
 
     auto s = Stmt::makeVarDecl(nameTok.text, ty, std::move(init), kw.line, kw.col);

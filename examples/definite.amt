@@ -1,0 +1,41 @@
+// A variable may be declared without an initializer; it must be assigned on
+// every path that reads it (definite-assignment analysis).
+fn sign(n: int) -> string {
+    var out: string;
+    if n > 0 {
+        out = "positive";
+    } else {
+        out = "non-positive";
+    }
+    return out;
+}
+
+// The else branch returns, so only the then branch reaches `return x`.
+fn clamp(n: int) -> int {
+    var v: int;
+    if n < 0 {
+        return 0;
+    } else {
+        v = n;
+    }
+    return v;
+}
+
+fn main() -> int {
+    print(sign(5));
+    print(sign(-5));
+    print(clamp(-3));
+    print(clamp(7));
+
+    var total: int;
+    total = 10;
+    total += 5;
+    print(total);
+
+    var seen: bool;
+    seen = true;
+    if seen {
+        print("seen");
+    }
+    return 0;
+}

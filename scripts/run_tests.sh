@@ -189,6 +189,63 @@ check "IEEE-754 float edge cases" "inf
 0
 1" "$out"
 
+# definite assignment: nested branches, shadowing, early return
+$BIN -o build/definite examples/definite.amt
+set +e
+out=$(./build/definite)
+rc=$?
+set -e
+check "definite-assignment output" "positive
+non-positive
+0
+7
+15
+seen" "$out"
+
+cat > build/da_nested.amt <<'EOF'
+fn nested(c: bool) -> int {
+    var y: int;
+    if c {
+        if c {
+            y = 7;
+        } else {
+            y = 8;
+        }
+    } else {
+        y = 9;
+    }
+    return y;
+}
+
+fn shadowed(c: bool) -> int {
+    var x: int = 100;
+    if c {
+        var x: int;
+        x = 5;
+        print(x);
+    }
+    return x;
+}
+
+fn main() -> int {
+    print(nested(true));
+    print(nested(false));
+    print(shadowed(true));
+    print(shadowed(false));
+    return 0;
+}
+EOF
+$BIN -o build/da_nested build/da_nested.amt
+set +e
+out=$(./build/da_nested)
+rc=$?
+set -e
+check "nested branch merge and shadowing" "7
+9
+5
+100
+100" "$out"
+
 # compound assignment + len()
 $BIN -o build/compound examples/compound.amt
 set +e
@@ -476,6 +533,12 @@ expect_fail "float modulo" tests/err_float_mod.amt "'%' has no float version"
 expect_fail "float array" tests/err_float_array.amt "array element type must be int or bool"
 expect_fail "float compared with int" tests/err_float_cmp_int.amt "cannot compare 'float' with 'int' with == / !="
 expect_fail "int() of an int" tests/err_float_conv.amt "'int' expects a float argument, got 'int'"
+expect_fail "read of unassigned var" tests/err_uninit_read.amt "variable 'x' is read before it is definitely assigned"
+expect_fail "unassigned after if without else" tests/err_uninit_branch.amt "variable 'x' is read before it is definitely assigned"
+expect_fail "unassigned after a loop" tests/err_uninit_loop.amt "variable 'x' is read before it is definitely assigned"
+expect_fail "compound on unassigned var" tests/err_uninit_compound.amt "variable 'x' is read before it is definitely assigned"
+expect_fail "var without a type" tests/err_uninit_infer.amt "needs an initializer when the type is omitted"
+expect_fail "uninitialized array" tests/err_uninit_array.amt "array variables must be initialized"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

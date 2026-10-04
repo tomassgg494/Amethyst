@@ -49,6 +49,39 @@ void Sema::declare(const std::string& name, const VarInfo& info, int line, int c
     scope.vars.emplace_back(name, stored);
 }
 
+Sema::FlowState Sema::snapshotFlow() const {
+    FlowState st;
+    for (const auto& scope : scopes_) {
+        for (const auto& v : scope.vars) {
+            st[{v.second.declLine, v.second.declCol}] = v.second.assigned;
+        }
+    }
+    return st;
+}
+
+Sema::FlowState Sema::mergeFlow(const FlowState& a, const FlowState& b) const {
+    FlowState out;
+    for (const auto& scope : scopes_) {
+        for (const auto& v : scope.vars) {
+            auto key = std::make_pair(v.second.declLine, v.second.declCol);
+            auto ia = a.find(key);
+            auto ib = b.find(key);
+            out[key] = (ia != a.end() && ib != b.end()) && ia->second && ib->second;
+        }
+    }
+    return out;
+}
+
+void Sema::applyFlow(const FlowState& s) {
+    for (auto& scope : scopes_) {
+        for (auto& v : scope.vars) {
+            auto key = std::make_pair(v.second.declLine, v.second.declCol);
+            auto it = s.find(key);
+            v.second.assigned = (it != s.end()) && it->second;
+        }
+    }
+}
+
 void Sema::collectFunctions(Program& program) {
     fnInfos_.clear();
     fnNames_.clear();
@@ -105,6 +138,7 @@ void Sema::checkFunction(FnDecl& fn) {
         nextSlot_ += units;
         VarInfo pi{p.type, p.slot, isArrayType(p.type) ? -1 : 0};
         pi.isParam = true;
+        pi.assigned = true;
         declare(p.name, pi, p.line, p.col);
     }
 
@@ -195,6 +229,13 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             break;
 
         case StmtKind::VarDecl: {
+            if (stmt.expr == nullptr) {
+                // `var x: T;` — parser guarantees an explicit non-array type
+                VarInfo info{stmt.declaredType, nextSlot_++, 0};
+                stmt.slot = info.slot;
+                declare(stmt.name, info, stmt.line, stmt.col);
+                break;
+            }
             Type initType = checkExpr(*stmt.expr);
 
             if (isArrayType(initType) && stmt.expr->kind != ExprKind::ArrayLit) {
@@ -245,6 +286,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
 
             VarInfo info{stmt.declaredType, -1,
                          isArrayType(stmt.declaredType) ? stmt.declaredSize : 0};
+            info.assigned = true;
             if (isArrayType(stmt.declaredType)) {
                 info.slot = nextSlot_;
                 nextSlot_ += stmt.declaredSize;
@@ -266,6 +308,11 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             if (isArrayType(var->type)) {
                 fail("cannot assign to whole array '" + stmt.name +
                          "' (assign elements: " + stmt.name + "[i] = ...)",
+                     stmt.line, stmt.col);
+            }
+            if (stmt.compoundOp != TokenType::Eof && !var->assigned) {
+                fail("variable '" + stmt.name +
+                         "' is read before it is definitely assigned",
                      stmt.line, stmt.col);
             }
             Type valueType = checkExpr(*stmt.expr);
@@ -292,6 +339,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 }
                 stmt.declaredType = var->type;  // codegen: int or float op
                 stmt.slot = var->slot;
+                var->assigned = true;
                 break;
             }
             if (valueType != var->type) {
@@ -301,6 +349,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                      stmt.line, stmt.col);
             }
             stmt.slot = var->slot;
+            var->assigned = true;
             break;
         }
 
@@ -345,13 +394,33 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                          typeName(cond) + "'",
                      stmt.line, stmt.col);
             }
+            FlowState before = snapshotFlow();
             checkBlock(*stmt.thenBlock, fnReturn);
+            FlowState afterThen = snapshotFlow();
+
+            // Both branches start from the same state; a variable counts as
+            // assigned afterwards only if it is assigned on every path that
+            // can get there. A branch that never completes is not a path.
+            FlowState afterElse = before;  // implicit else assigns nothing
             if (stmt.elseBlock) {
+                applyFlow(before);
                 if (stmt.elseBlock->kind == StmtKind::Block) {
                     checkBlock(*stmt.elseBlock, fnReturn);
                 } else {
                     checkStmt(*stmt.elseBlock, fnReturn);
                 }
+                afterElse = snapshotFlow();
+            }
+
+            bool thenFalls = !stmtAlwaysTerminates(*stmt.thenBlock);
+            bool elseFalls =
+                stmt.elseBlock ? !stmtAlwaysTerminates(*stmt.elseBlock) : true;
+            if (thenFalls && elseFalls) {
+                applyFlow(mergeFlow(afterThen, afterElse));
+            } else if (thenFalls) {
+                applyFlow(afterThen);   // else branch always terminates
+            } else {
+                applyFlow(afterElse);   // then branch always terminates
             }
             break;
         }
@@ -363,9 +432,12 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                          typeName(cond) + "'",
                      stmt.line, stmt.col);
             }
+            FlowState before = snapshotFlow();
             loopDepth_++;
             checkBlock(*stmt.thenBlock, fnReturn);
             loopDepth_--;
+            // the body may run zero times, so it assigns nothing afterwards
+            applyFlow(before);
             break;
         }
 
@@ -386,13 +458,17 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             pushScope();
             stmt.loopSlot = nextSlot_++;
             stmt.endSlot = nextSlot_++;
-            declare(stmt.loopVar, VarInfo{Type::Int, stmt.loopSlot, 0},
-                    stmt.line, stmt.col);
+            VarInfo loopVar{Type::Int, stmt.loopSlot, 0};
+            loopVar.assigned = true;
+            declare(stmt.loopVar, loopVar, stmt.line, stmt.col);
 
+            FlowState before = snapshotFlow();
             loopDepth_++;
             checkBlock(*stmt.thenBlock, fnReturn);
             loopDepth_--;
             popScope();
+            // the body may run zero times, so it assigns nothing afterwards
+            applyFlow(before);
             break;
         }
 
@@ -494,6 +570,11 @@ Type Sema::checkIdent(Expr& expr) {
              expr.col);
     }
     var->used = true;
+    if (!var->assigned) {
+        fail("variable '" + expr.name +
+                 "' is read before it is definitely assigned",
+             expr.line, expr.col);
+    }
     expr.slot = var->slot;
     expr.arraySize = var->arraySize;
     return var->type;

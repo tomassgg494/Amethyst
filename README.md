@@ -116,8 +116,9 @@ fn main() -> int {
 | Form | Meaning |
 |------|---------|
 | `fn name(a: int, b: bool) -> int { ... }` | Function (up to 6 register slots — an array parameter uses 2; the rest are passed on the stack) |
-| `var x: int = expr;` | Local variable (must be initialized) |
-| `var x = expr;` | Type inference from initializer |
+| `var x: int = expr;` | Local variable, initialized at the declaration |
+| `var x: int;` | Local variable left unassigned until the first `x = expr` |
+| `var x = expr;` | Type inference from initializer (an initializer is required when the type is omitted) |
 | `var a: int[10] = [1, 2, ...];` | Fixed-size array (element type `int` or `bool`) |
 | `fn f(a: int[])` | Array parameter: `int[]` / `bool[]`, passed as pointer + length |
 | `fn f(a: string)` | String parameter: pointer to NUL-terminated text |
@@ -192,21 +193,30 @@ and `+` `-` `*` `/` work on two `int`s or two `float`s (never mixed).
 ## Compiler pipeline
 
 ```
-.amt → Lexer → Parser → Sema (types, scopes, frame slots)
+.amt → Lexer → Parser → Sema (types, scopes, definite assignment, frame slots)
                    → Codegen (GAS x86-64, System V AMD64 ABI)
                    → as → .o → gcc -no-pie (ld + crt + libc) → executable
 ```
 
 - Locals live in the stack frame (`-8(%rbp)`, `-16(%rbp)`, …).
 - Register args: `rdi rsi rdx rcx r8 r9` (an array parameter occupies two of
-  them); further args on the stack (copied into the frame on entry).
-- `print` lowers to `printf("%ld\n", ...)`.
+  them) and `xmm0`-`xmm7` for `float`s; further args on the stack (copied into
+  the frame on entry).
+- `print` lowers to `puts` for strings, `printf("%.15g\n", ...)` for floats and
+  `printf("%ld\n", ...)` for `int` / `bool`.
 
 Errors are reported as `file:line:col: error: message`. Warnings
 (`unused variable`, `unreachable code`) use the same prefix with `warning:`
 and are printed to stderr without stopping the build.
 
 Non-void functions must return on all control paths (checked for `return`, blocks, and `if`/`else`; `while` alone does not count as returning).
+
+Reading a variable before it is *definitely assigned* is an error. A
+variable declared with `var x: int;` counts as assigned only after `x = ...`
+on **every** path that reaches the read: an `if`/`else` needs both branches to
+assign (a branch that always `return`s is not a path), and a loop body does
+not count, because it may run zero times — initialize those variables instead.
+Array variables and type-inferred declarations always need an initializer.
 
 Array out-of-bounds access is caught at runtime: prints
 `Amethyst runtime error: index N out of bounds for array of size M` and exits 1.
@@ -216,8 +226,7 @@ Division or modulo by zero prints
 
 ## Roadmap (not in v1.1)
 
-Pointers, structs, heap allocation, modules, optimizations,
-definite-assignment analysis.
+Pointers, structs, heap allocation, modules, optimizations.
 
 ## Project layout
 

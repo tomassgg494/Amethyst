@@ -1,7 +1,9 @@
 #pragma once
 
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "ast.hpp"
 
@@ -42,6 +44,7 @@ private:
         int declCol = 0;
         bool used = false;   // referenced after declaration (read or assigned)
         bool isParam = false;
+        bool assigned = false;  // definitely assigned before any read
     };
 
     struct Scope {
@@ -52,6 +55,16 @@ private:
     void popScope();
     VarInfo* lookup(const std::string& name);
     void declare(const std::string& name, const VarInfo& info, int line, int col);
+
+    // Definite-assignment: the state is one flag per live variable, keyed by
+    // the declaration position (unique per `var`). Branches are analyzed from
+    // the same state and their states are intersected where both can complete;
+    // a loop body is analyzed from the state before it, because it may run
+    // zero times, and the state after the loop is the state before it.
+    using FlowState = std::map<std::pair<int, int>, bool>;
+    FlowState snapshotFlow() const;
+    FlowState mergeFlow(const FlowState& a, const FlowState& b) const;
+    void applyFlow(const FlowState& s);
 
     void checkStmt(Stmt& stmt, Type fnReturn);
     void checkBlock(Stmt& block, Type fnReturn);

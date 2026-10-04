@@ -319,9 +319,13 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
                             std::to_string(slotOffset(stmt.slot + static_cast<int>(i))) +
                             "(%rbp)\n";
                 }
-            } else {
+            } else if (stmt.expr) {
                 emitExpr(*stmt.expr);
                 out_ += "    movq %rax, " +
+                        std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
+            } else {
+                // `var x: T;` — sema guarantees no read before the first store
+                out_ += "    movq $0, " +
                         std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
             }
             break;
