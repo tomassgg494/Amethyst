@@ -1,0 +1,6 @@
+fn nothing() -> void {}
+
+fn main() -> int {
+    var a = [nothing()];
+    return 0;
+}

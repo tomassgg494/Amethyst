@@ -20,6 +20,15 @@ fn moveX(p: Point, dx: int) -> void {
     p.x += dx;
 }
 
+fn shiftAll(pts: Point[]) -> int {
+    var total = 0;
+    for i in 0..len(pts) {
+        pts[i].x += 10;
+        total += pts[i].x;
+    }
+    return total;
+}
+
 fn chainSum(n: Node) -> int {
     var total = 0;
     var cur = n;
@@ -53,6 +62,19 @@ fn main() -> int {
     var head = new Node { value: 7, next: tail };
     print(chainSum(head));   // 12
     print(head.next.value);  // 5
+
+    // an array of structs: one slot per element, every slot a reference
+    var pts: Point[3] = [
+        new Point { x: 1, y: 0.0, label: "a" },
+        new Point { x: 2, y: 0.0, label: "b" },
+        new Point { x: 3, y: 0.0, label: "c" }
+    ];
+    print(shiftAll(pts));    // 11 + 12 + 13 = 36
+    print(pts[2].x);         // 13
+    free(pts[0]);
+    free(pts[1]);
+    free(pts[2]);
+    print(pts[0] == null);   // 1
 
     free(tail);
     free(head);

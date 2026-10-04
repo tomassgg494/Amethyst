@@ -1,0 +1,4 @@
+fn main() -> int {
+    var a = [null];
+    return 0;
+}

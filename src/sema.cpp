@@ -449,10 +449,6 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                          "' (only structs can be freed)",
                      stmt.line, stmt.col);
             }
-            if (stmt.target->kind == ExprKind::Index) {
-                fail("free expects a whole variable, not an array element",
-                     stmt.line, stmt.col);
-            }
             break;
         }
 
@@ -669,14 +665,20 @@ Type Sema::checkArrayLit(Expr& expr) {
         fail("array literal must not be empty", expr.line, expr.col);
     }
     Type elem = checkExpr(*expr.args[0]);
-    if (elem != Type::Int && elem != Type::Bool) {
-        fail(std::string("array elements must be int or bool, got '") +
-                 tyName(elem) + "'",
+    if (elem == Type::Null) {
+        fail("array elements cannot be 'null' (the first element gives the "
+             "array its type)",
              expr.args[0]->line, expr.args[0]->col);
+    }
+    if (elem == Type::Void) {
+        fail("array elements must have a value", expr.args[0]->line,
+             expr.args[0]->col);
     }
     for (size_t i = 1; i < expr.args.size(); ++i) {
         Type t = checkExpr(*expr.args[i]);
-        if (t != elem) {
+        // `null` may only fill a hole in an array of structs
+        bool hole = elem.kind == Type::Kind::Struct && t == Type::Null;
+        if (t != elem && !hole) {
             fail(std::string("array element ") + std::to_string(i + 1) +
                      " has type '" + tyName(t) + "', expected '" +
                      tyName(elem) + "' (all elements must match)",

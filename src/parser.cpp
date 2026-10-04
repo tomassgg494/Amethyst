@@ -70,8 +70,8 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
     // slice parameter type: int[] / bool[] / Point[]
     if (allowSlice && match(TokenType::LBracket)) {
         if (check(TokenType::IntLit)) {
-            fail("array parameters must be written as 'int[]' or 'bool[]' "
-                 "(the length is not part of the type)");
+            fail("array parameters must be written as a slice, e.g. 'int[]' "
+                 "or 'Point[]' (the length is not part of the type)");
         }
         expect(TokenType::RBracket, "']' after '['");
         return Type::arrayOf(base);
@@ -204,11 +204,8 @@ StmtPtr Parser::parseVarDecl() {
 
     if (match(TokenType::Colon)) {
         ty = parseType(false);
-        // array suffix: int[10] / bool[4]
+        // array suffix: int[10] / bool[4] / float[3] / Point[5]
         if (check(TokenType::LBracket)) {
-            if (ty == Type::Str) {
-                fail("arrays of strings are not supported (only int and bool)");
-            }
             advance();
             if (check(TokenType::RBracket)) {
                 fail("local arrays need a fixed size, e.g. 'int[10]' "
@@ -220,15 +217,11 @@ StmtPtr Parser::parseVarDecl() {
                 failAt(sizeTok, "array size must be between 1 and 10000000");
             }
             expect(TokenType::RBracket, "']' after array size");
-            if (ty == Type::Int) {
-                ty = Type::arrayOf(Type::Int);
-                size = static_cast<int>(n);
-            } else if (ty == Type::Bool) {
-                ty = Type::arrayOf(Type::Bool);
-                size = static_cast<int>(n);
-            } else {
-                fail("array element type must be int or bool");
+            if (ty == Type::Void) {
+                fail("arrays cannot hold void values");
             }
+            ty = Type::arrayOf(ty);
+            size = static_cast<int>(n);
         }
     } else {
         inferred = true;

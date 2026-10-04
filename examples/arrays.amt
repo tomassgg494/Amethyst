@@ -27,5 +27,16 @@ fn main() -> int {
     var ok = x > 40;
     print(x);   // 42
     print(ok);  // 1
+
+    // any element type: float, string and (see structs.amt) struct
+    var scores: float[3] = [1.5, 2.5, 3.5];
+    print(scores[2]);        // 3.5
+    scores[0] = 9.75;
+    print(scores[0]);        // 9.75
+
+    var words: string[2] = ["ametista", "cristal"];
+    print(words[0]);         // ametista
+    words[1] = "rocha";
+    print(words[1]);         // rocha
     return 0;
 }

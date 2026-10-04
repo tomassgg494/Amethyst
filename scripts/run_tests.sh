@@ -115,7 +115,11 @@ expected_arrays="10
 219
 16
 42
-1"
+1
+3.5
+9.75
+ametista
+rocha"
 check "arrays output" "$expected_arrays" "$out"
 
 # strings
@@ -291,6 +295,9 @@ centro
 0
 12
 5
+36
+13
+1
 1"
 check "structs output" "$expected_structs" "$out"
 check "structs exit" "0" "$rc"
@@ -568,12 +575,11 @@ expect_fail "len arity" tests/err_len_arity.amt "'len' expects 1 argument(s), go
 expect_fail "len redefinition" tests/err_len_redef.amt "'len' is a builtin and cannot be redefined"
 expect_fail "array literal argument" tests/err_array_arg_literal.amt "must be a variable (assign the array first)"
 expect_fail "slice element type" tests/err_slice_elem_type.amt "expected 'bool[]', got 'int[]'"
-expect_fail "sized array parameter" tests/err_param_array_size.amt "array parameters must be written as 'int[]'"
+expect_fail "sized array parameter" tests/err_param_array_size.amt "array parameters must be written as a slice"
 expect_fail "slice local variable" tests/err_slice_local.amt "local arrays need a fixed size"
 expect_fail "array copy" tests/err_array_copy.amt "must be initialized with an array literal"
 expect_fail "float + int" tests/err_float_int_mix.amt "operator expects two floats, got 'float' and 'int'"
 expect_fail "float modulo" tests/err_float_mod.amt "'%' has no float version"
-expect_fail "float array" tests/err_float_array.amt "array element type must be int or bool"
 expect_fail "float compared with int" tests/err_float_cmp_int.amt "cannot compare 'float' with 'int' with == / !="
 expect_fail "int() of an int" tests/err_float_conv.amt "'int' expects a float argument, got 'int'"
 expect_fail "read of unassigned var" tests/err_uninit_read.amt "variable 'x' is read before it is definitely assigned"
@@ -595,6 +601,9 @@ expect_fail "array struct field" tests/err_struct_array_field.amt "array fields 
 expect_fail "unknown type" tests/err_unknown_type.amt "unknown type 'Foo'"
 expect_fail "field on null literal" tests/err_null_field.amt "cannot read field 'x' from 'null'"
 expect_fail "field of unassigned struct" tests/err_struct_uninit.amt "variable 'p' is read before it is definitely assigned"
+expect_fail "struct array element type" tests/err_struct_elem_type.amt "array element 2 has type 'int', expected 'Point'"
+expect_fail "null array element" tests/err_null_array.amt "array elements cannot be 'null'"
+expect_fail "void array element" tests/err_void_array.amt "array elements must have a value"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
