@@ -1,0 +1,47 @@
+// 64-bit IEEE 754 binary64. int and float never mix implicitly —
+// convert with float(n) / int(x).
+fn area(w: float, h: float) -> float {
+    return w * h;
+}
+
+fn half(x: float) -> float {
+    return x / 2.0;
+}
+
+fn average(values: int[], scale: float) -> float {
+    var total = 0;
+    for i in 0..len(values) {
+        total += values[i];
+    }
+    return float(total) / scale;
+}
+
+fn main() -> int {
+    var pi: float = 3.5;
+    var q = 2.5;  // type inferred from the initializer
+
+    print(pi);
+    print(pi + q);   // 6
+    print(pi - q);   // 1
+    print(pi * q);   // 8.75
+    print(pi / q);   // 1.4
+    print(-pi);      // -3.5
+
+    print(pi == 3.5);  // 1
+    print(q < pi);     // 1
+    print(pi >= 3.5);  // 1
+
+    print(area(3.0, 4.0));  // 12
+    print(half(5.0));       // 2.5
+
+    pi += 1.5;
+    print(pi);  // 5
+
+    var scores: int[3] = [1, 2, 6];
+    print(average(scores, 3.0));  // 3
+
+    print(int(2.7));        // 2 (truncates toward zero)
+    print(int(-2.7));       // -2
+    print(float(7) / 2.0);  // 3.5
+    return 0;
+}

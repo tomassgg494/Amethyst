@@ -1,9 +1,18 @@
 #include "codegen.hpp"
 
+#include <iomanip>
+#include <limits>
 #include <sstream>
 
 std::string Codegen::newLabel(const std::string& base) {
     return "." + base + "_" + std::to_string(labelCounter_++);
+}
+
+// Spelling that the assembler reads back as exactly the same double.
+static std::string floatLiteral(double v) {
+    std::ostringstream ss;
+    ss << std::setprecision(std::numeric_limits<double>::max_digits10) << v;
+    return ss.str();
 }
 
 int Codegen::slotOffset(int slot) const {
@@ -15,7 +24,9 @@ std::string Codegen::emit(const Program& program) {
     labelCounter_ = 0;
     stackDepth_ = 0;
     strCounter_ = 0;
+    floatCounter_ = 0;
     strings_.clear();
+    floats_.clear();
     loopStack_.clear();
 
     out_ += "# Amethyst generated assembly (x86-64 System V)\n";
@@ -23,6 +34,8 @@ std::string Codegen::emit(const Program& program) {
     out_ += ".section .rodata\n";
     out_ += ".fmt_int:\n";
     out_ += "    .string \"%ld\\n\"\n";
+    out_ += ".fmt_float:\n";
+    out_ += "    .string \"%.15g\\n\"\n";
     out_ += ".fmt_bounds:\n";
     out_ += "    .string \"Amethyst runtime error: index %ld out of bounds for array of size %ld\\n\"\n";
     out_ += ".fmt_divzero:\n";
@@ -59,7 +72,7 @@ std::string Codegen::emit(const Program& program) {
         emitFunction(fn, program);
     }
 
-    if (!strings_.empty()) {
+    if (!strings_.empty() || !floats_.empty()) {
         out_ += ".section .rodata\n";
         for (const auto& s : strings_) {
             out_ += s.first + ":\n";
@@ -76,6 +89,10 @@ std::string Codegen::emit(const Program& program) {
             }
             out_ += "    .string \"" + esc + "\"\n";
         }
+        for (const auto& f : floats_) {
+            out_ += f.first + ":\n";
+            out_ += "    .double " + floatLiteral(f.second) + "\n";
+        }
         out_ += ".text\n";
     }
     return out_;
@@ -84,6 +101,7 @@ std::string Codegen::emit(const Program& program) {
 void Codegen::emitFunction(const FnDecl& fn, const Program& program) {
     stackDepth_ = 0;
     loopStack_.clear();
+    currentReturn_ = fn.returnType;
 
     out_ += ".globl " + fn.name + "\n";
     out_ += ".type " + fn.name + ", @function\n";
@@ -97,22 +115,39 @@ void Codegen::emitFunction(const FnDecl& fn, const Program& program) {
         out_ += "    subq $" + std::to_string(frameBytes) + ", %rsp\n";
     }
 
-    static const char* argRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
-    int regIdx = 0;
+    static const char* intRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+    static const char* sseRegs[8] = {"%xmm0", "%xmm1", "%xmm2", "%xmm3",
+                                     "%xmm4", "%xmm5", "%xmm6", "%xmm7"};
+    int intIdx = 0;
+    int sseIdx = 0;
     int stackOff = 16;
     for (const auto& p : fn.params) {
-        // a slice is {ptr, len} and therefore occupies two units
+        // a slice is {ptr, len} and therefore occupies two integer units
         int units = isArrayType(p.type) ? 2 : 1;
         std::string ptrSlot = std::to_string(slotOffset(p.slot)) + "(%rbp)";
         std::string lenSlot =
             std::to_string(slotOffset(p.slot + 1)) + "(%rbp)";
-        if (regIdx + units <= 6) {
-            out_ += "    movq " + std::string(argRegs[regIdx]) + ", " + ptrSlot + "\n";
+
+        if (p.type == Type::Float) {
+            if (sseIdx < 8) {
+                out_ += "    movq " + std::string(sseRegs[sseIdx]) + ", " +
+                        ptrSlot + "\n";
+                sseIdx++;
+            } else {
+                out_ += "    movq " + std::to_string(stackOff) + "(%rbp), %rax\n";
+                out_ += "    movq %rax, " + ptrSlot + "\n";
+                stackOff += 8;
+            }
+            continue;
+        }
+
+        if (intIdx + units <= 6) {
+            out_ += "    movq " + std::string(intRegs[intIdx]) + ", " + ptrSlot + "\n";
             if (units == 2) {
-                out_ += "    movq " + std::string(argRegs[regIdx + 1]) + ", " +
+                out_ += "    movq " + std::string(intRegs[intIdx + 1]) + ", " +
                         lenSlot + "\n";
             }
-            regIdx += units;
+            intIdx += units;
         } else {
             out_ += "    movq " + std::to_string(stackOff) + "(%rbp), %rax\n";
             out_ += "    movq %rax, " + ptrSlot + "\n";
@@ -127,6 +162,9 @@ void Codegen::emitFunction(const FnDecl& fn, const Program& program) {
     emitStmt(*fn.body, program);
 
     out_ += "    movq $0, %rax\n";
+    if (fn.returnType == Type::Float) {
+        out_ += "    movq %rax, %xmm0\n";  // float results come back in %xmm0
+    }
     out_ += "    leave\n";
     out_ += "    ret\n";
     out_ += ".size " + fn.name + ", .-" + fn.name + "\n";
@@ -236,6 +274,35 @@ void Codegen::emitIntOp(TokenType op) {
     }
 }
 
+void Codegen::emitFloatOp(TokenType op) {
+    // lhs in %rax, rhs in %rcx (raw double patterns) → result in %rax
+    out_ += "    movq %rax, %xmm0\n";
+    out_ += "    movq %rcx, %xmm1\n";
+    switch (op) {
+        case TokenType::Plus:
+        case TokenType::PlusEq:
+            out_ += "    addsd %xmm1, %xmm0\n";
+            break;
+        case TokenType::Minus:
+        case TokenType::MinusEq:
+            out_ += "    subsd %xmm1, %xmm0\n";
+            break;
+        case TokenType::Star:
+        case TokenType::StarEq:
+            out_ += "    mulsd %xmm1, %xmm0\n";
+            break;
+        case TokenType::Slash:
+        case TokenType::SlashEq:
+            // IEEE-754: x/0.0 yields ±inf (or NaN), never a trap
+            out_ += "    divsd %xmm1, %xmm0\n";
+            break;
+        default:
+            out_ += "    # unhandled float operator\n";
+            break;
+    }
+    out_ += "    movq %xmm0, %rax\n";
+}
+
 void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
     switch (stmt.kind) {
         case StmtKind::Block: {
@@ -270,7 +337,11 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
                         std::to_string(slotOffset(stmt.slot)) + "(%rbp), %rax\n";
                 out_ += "    popq %rcx\n";
                 stackDepth_--;
-                emitIntOp(stmt.compoundOp);
+                if (stmt.declaredType == Type::Float) {
+                    emitFloatOp(stmt.compoundOp);
+                } else {
+                    emitIntOp(stmt.compoundOp);
+                }
                 out_ += "    movq %rax, " +
                         std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
                 break;
@@ -388,6 +459,9 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
             } else {
                 out_ += "    movq $0, %rax\n";
             }
+            if (currentReturn_ == Type::Float) {
+                out_ += "    movq %rax, %xmm0\n";  // float results come back in %xmm0
+            }
             out_ += "    leave\n";
             out_ += "    ret\n";
             break;
@@ -403,6 +477,12 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
                 emitExpr(*stmt.expr);  // %rax = pointer to NUL-terminated text
                 out_ += "    movq %rax, %rdi\n";
                 out_ += "    call puts@PLT\n";
+            } else if (stmt.expr->type == Type::Float) {
+                emitExpr(*stmt.expr);  // %rax = raw double pattern
+                out_ += "    movq %rax, %xmm0\n";
+                out_ += "    leaq .fmt_float(%rip), %rdi\n";
+                out_ += "    movl $1, %eax\n";  // one vector argument
+                out_ += "    call printf@PLT\n";
             } else {
                 emitExpr(*stmt.expr);
                 out_ += "    leaq .fmt_int(%rip), %rdi\n";
@@ -425,6 +505,14 @@ void Codegen::emitExpr(const Expr& expr) {
             out_ += "    movq $" + std::string(expr.boolValue ? "1" : "0") +
                     ", %rax\n";
             break;
+
+        case ExprKind::FloatLit: {
+            // raw 8-byte pattern, integer-loaded into %rax
+            std::string label = ".Lf_" + std::to_string(floatCounter_++);
+            floats_.push_back({label, expr.floatValue});
+            out_ += "    movq " + label + "(%rip), %rax\n";
+            break;
+        }
 
         case ExprKind::StrLit:
             // only reachable if sema allowed it (print handles separately;
@@ -464,7 +552,13 @@ void Codegen::emitExpr(const Expr& expr) {
         case ExprKind::Unary: {
             emitExpr(*expr.lhs);
             if (expr.op == TokenType::Minus) {
-                out_ += "    negq %rax\n";
+                if (expr.type == Type::Float) {
+                    // flip the IEEE sign bit; arithmetic neg is wrong for doubles
+                    out_ += "    movabsq $0x8000000000000000, %rcx\n";
+                    out_ += "    xorq %rcx, %rax\n";
+                } else {
+                    out_ += "    negq %rax\n";
+                }
             } else {
                 out_ += "    cmpq $0, %rax\n";
                 out_ += "    sete %al\n";
@@ -521,6 +615,48 @@ void Codegen::emitExpr(const Expr& expr) {
                 out_ += std::string("    ") +
                         (op == TokenType::EqEq ? "sete" : "setne") + " %al\n";
                 out_ += "    movzbq %al, %rax\n";
+                break;
+            }
+
+            // doubles: load the raw patterns and let SSE do the work
+            if (expr.lhs->type == Type::Float) {
+                bool isCmp = op == TokenType::Lt || op == TokenType::Le ||
+                             op == TokenType::Gt || op == TokenType::Ge ||
+                             op == TokenType::EqEq || op == TokenType::NotEq;
+                if (isCmp) {
+                    out_ += "    movq %rax, %xmm0\n";  // lhs
+                    out_ += "    movq %rcx, %xmm1\n";  // rhs
+                    out_ += "    ucomisd %xmm1, %xmm0\n";
+                    // a comparison with NaN is false for < <= > >= == and
+                    // true for !=, so the unordered flag (PF) is folded in
+                    switch (op) {
+                        case TokenType::Lt:
+                            out_ += "    setb %al\n    setnp %cl\n";
+                            out_ += "    andb %cl, %al\n";
+                            break;
+                        case TokenType::Le:
+                            out_ += "    setbe %al\n    setnp %cl\n";
+                            out_ += "    andb %cl, %al\n";
+                            break;
+                        case TokenType::Gt:
+                            out_ += "    seta %al\n";
+                            break;
+                        case TokenType::Ge:
+                            out_ += "    setae %al\n";
+                            break;
+                        case TokenType::EqEq:
+                            out_ += "    sete %al\n    setnp %cl\n";
+                            out_ += "    andb %cl, %al\n";
+                            break;
+                        default:
+                            out_ += "    setne %al\n    setp %cl\n";
+                            out_ += "    orb %cl, %al\n";
+                            break;
+                    }
+                    out_ += "    movzbq %al, %rax\n";
+                } else {
+                    emitFloatOp(op);
+                }
                 break;
             }
 
@@ -596,7 +732,9 @@ void Codegen::emitExprBool(const Expr& expr) {
 }
 
 void Codegen::emitCall(const Expr& expr) {
-    static const char* argRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+    static const char* intRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+    static const char* sseRegs[8] = {"%xmm0", "%xmm1", "%xmm2", "%xmm3",
+                                     "%xmm4", "%xmm5", "%xmm6", "%xmm7"};
 
     if (expr.name == "len") {
         if (expr.args[0]->type == Type::Str) {
@@ -608,26 +746,49 @@ void Codegen::emitCall(const Expr& expr) {
         }
         return;
     }
+    if (expr.name == "float") {  // int → float
+        emitExpr(*expr.args[0]);
+        out_ += "    cvtsi2sd %rax, %xmm0\n";
+        out_ += "    movq %xmm0, %rax\n";
+        return;
+    }
+    if (expr.name == "int") {  // float → int, truncating toward zero
+        emitExpr(*expr.args[0]);
+        out_ += "    movq %rax, %xmm0\n";
+        out_ += "    cvttsd2si %xmm0, %rax\n";
+        return;
+    }
 
     size_t n = expr.args.size();
     std::vector<size_t> units(n, 1);
     std::vector<bool> inRegs(n, false);
-    size_t regUnits = 0;
+    std::vector<bool> useSse(n, false);
+    size_t intUnits = 0;
+    size_t sseUnits = 0;
     size_t stackUnits = 0;
     for (size_t i = 0; i < n; ++i) {
         if (isArrayType(expr.args[i]->type)) units[i] = 2;
-        // a slice needs two registers; if they are not all free it is
-        // passed entirely on the stack (System V classification)
-        if (regUnits + units[i] <= 6) {
+        // System V: floats take an SSE register, everything else an integer
+        // register; a slice needs two integer registers. Whatever does not
+        // fit goes on the stack — caller and callee classify identically.
+        if (expr.args[i]->type == Type::Float) {
+            if (sseUnits < 8) {
+                inRegs[i] = true;
+                useSse[i] = true;
+                sseUnits++;
+            } else {
+                stackUnits += units[i];
+            }
+        } else if (intUnits + units[i] <= 6) {
             inRegs[i] = true;
-            regUnits += units[i];
+            intUnits += units[i];
         } else {
             stackUnits += units[i];
         }
     }
 
     size_t stackStorage = stackUnits * 8;
-    size_t regStorage = regUnits * 8;
+    size_t regStorage = (intUnits + sseUnits) * 8;
 
     size_t total = stackStorage + regStorage;
     int live = stackDepth_ * 8;
@@ -662,19 +823,28 @@ void Codegen::emitCall(const Expr& expr) {
         }
     }
 
-    size_t regIdx = 0;
+    size_t intIdx = 0;
+    size_t sseIdx = 0;
     for (size_t i = 0; i < n; ++i) {
         if (!inRegs[i]) continue;
-        out_ += "    movq " + std::to_string(off[i]) + "(%rsp), " +
-                argRegs[regIdx] + "\n";
+        std::string slot = std::to_string(off[i]) + "(%rsp)";
+        if (useSse[i]) {
+            out_ += "    movq " + slot + ", " + std::string(sseRegs[sseIdx]) + "\n";
+            sseIdx++;
+            continue;
+        }
+        out_ += "    movq " + slot + ", " + std::string(intRegs[intIdx]) + "\n";
         if (units[i] == 2) {
             out_ += "    movq " + std::to_string(off[i] + 8) + "(%rsp), " +
-                    argRegs[regIdx + 1] + "\n";
+                    std::string(intRegs[intIdx + 1]) + "\n";
         }
-        regIdx += units[i];
+        intIdx += units[i];
     }
 
     out_ += "    call " + expr.name + "@PLT\n";
+    if (expr.type == Type::Float) {
+        out_ += "    movq %xmm0, %rax\n";  // float results come back in %xmm0
+    }
 
     if (total > 0) {
         out_ += "    addq $" + std::to_string(total) + ", %rsp\n";

@@ -9,8 +9,9 @@
 enum class Type {
     Int,
     Bool,
+    Float,      // 64-bit IEEE 754 binary64
     Void,
-    Str,        // string literal (only usable with print in v1.1)
+    Str,        // string value (immutable text in .rodata)
     ArrayInt,   // int[N]
     ArrayBool,  // bool[N]
     Error,      // error-recovery sentinel; never reported to the user
@@ -20,6 +21,7 @@ inline const char* typeName(Type t) {
     switch (t) {
         case Type::Int: return "int";
         case Type::Bool: return "bool";
+        case Type::Float: return "float";
         case Type::Void: return "void";
         case Type::Str: return "string";
         case Type::ArrayInt: return "int[]";
@@ -45,6 +47,7 @@ using StmtPtr = std::unique_ptr<Stmt>;
 
 enum class ExprKind {
     IntLit,
+    FloatLit,
     BoolLit,
     StrLit,
     ArrayLit,
@@ -66,6 +69,9 @@ struct Expr {
     // IntLit / BoolLit
     long long intValue = 0;
     bool boolValue = false;
+
+    // FloatLit
+    double floatValue = 0.0;
 
     // StrLit (decoded content, may contain \n etc.)
     std::string strValue;
@@ -91,6 +97,14 @@ struct Expr {
         auto e = std::make_unique<Expr>();
         e->kind = ExprKind::IntLit;
         e->intValue = v;
+        e->line = line;
+        e->col = col;
+        return e;
+    }
+    static ExprPtr makeFloat(double v, int line, int col) {
+        auto e = std::make_unique<Expr>();
+        e->kind = ExprKind::FloatLit;
+        e->floatValue = v;
         e->line = line;
         e->col = col;
         return e;
@@ -188,7 +202,7 @@ struct Stmt {
 
     // VarDecl / Assign / AssignIndex
     std::string name;
-    Type declaredType = Type::Void;  // VarDecl only
+    Type declaredType = Type::Void;  // VarDecl: written type; Assign(compound): operand type
     int declaredSize = 0;            // VarDecl arrays: N in int[N]
     bool typeInferred = false;       // VarDecl: written as `var x = e`
 

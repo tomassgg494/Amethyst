@@ -49,12 +49,14 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
         base = Type::Int;
     } else if (match(TokenType::KwBool)) {
         base = Type::Bool;
+    } else if (match(TokenType::KwFloat)) {
+        return Type::Float;
     } else if (match(TokenType::KwString)) {
         return Type::Str;
     } else if (allowVoid && match(TokenType::KwVoid)) {
         return Type::Void;
     } else {
-        fail("expected type (int, bool, string" +
+        fail("expected type (int, bool, float, string" +
              std::string(allowVoid ? ", void" : "") + ")");
     }
 
@@ -402,6 +404,24 @@ ExprPtr Parser::parsePrimary() {
         const Token& tok = advance();
         long long v = std::strtoll(tok.text.c_str(), nullptr, 10);
         return Expr::makeInt(v, tok.line, tok.col);
+    }
+    // conversion builtins spelled with a type keyword: int(x), float(x)
+    if ((check(TokenType::KwInt) || check(TokenType::KwFloat)) &&
+        peek(1).type == TokenType::LParen) {
+        const Token& kw = advance();
+        std::vector<ExprPtr> args;
+        expect(TokenType::LParen, "'(' after '" + kw.text + "'");
+        if (!check(TokenType::RParen)) {
+            do {
+                args.push_back(parseExpression());
+            } while (match(TokenType::Comma));
+        }
+        expect(TokenType::RParen, "')' after arguments");
+        return Expr::makeCall(kw.text, std::move(args), kw.line, kw.col);
+    }
+    if (check(TokenType::FloatLit)) {
+        const Token& tok = advance();
+        return Expr::makeFloat(tok.num, tok.line, tok.col);
     }
     if (check(TokenType::KwTrue)) {
         const Token& tok = advance();

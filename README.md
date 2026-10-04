@@ -122,10 +122,11 @@ fn main() -> int {
 | `fn f(a: int[])` | Array parameter: `int[]` / `bool[]`, passed as pointer + length |
 | `fn f(a: string)` | String parameter: pointer to NUL-terminated text |
 | `var s: string = "hi";` | String variable (no concatenation, no indexing) |
+| `var x: float = 1.5;` | Floating-point variable (64-bit binary64) |
 | `x = expr;` | Assignment |
 | `x += expr;` | Compound assignment: `+=` `-=` `*=` `/=` `%=` (also on `a[i]`) |
 | `a[i] = expr;` | Array element assignment |
-| `print(expr);` | Print `int`, `bool`, or `string` |
+| `print(expr);` | Print `int`, `bool`, `float` or `string` |
 
 Entry point: `fn main() -> int` (no parameters).
 
@@ -134,11 +135,17 @@ Entry point: `fn main() -> int` (no parameters).
 | Form | Meaning |
 |------|---------|
 | `len(a)` | number of elements of an array, or byte length of a string; result is a plain `int`, so `for i in 0..len(a)` works |
+| `float(n)` | `int` → `float` (widening) |
+| `int(x)` | `float` → `int`, truncating toward zero |
 
 ### Types
 
 - `int` — 64-bit signed integer
 - `bool` — `true` / `false`
+- `float` — 64-bit IEEE 754 binary64; literals are `1.5`, `0.0`, `2e-3`
+  (`0..10` is still a range, not a float). Division by zero yields `inf` /
+  `NaN` as IEEE-754 specifies — it does not trap — and every comparison with
+  `NaN` is false except `!=`, which is true.
 - `int[N]` / `bool[N]` — fixed-size stack arrays (bounds-checked at runtime)
 - `int[]` / `bool[]` — array parameter type: pointer + length; it aliases the
   caller's array, so the callee can write through it, and `len()` works on it
@@ -147,7 +154,9 @@ Entry point: `fn main() -> int` (no parameters).
   return it from functions. There is no concatenation, indexing or ordering.
 - `void` — only as a function return type
 
-No implicit conversions: `int` and `bool` never mix.
+No implicit conversions: `int`, `bool`, `float` and `string` never mix on
+their own — write `float(n)` or `int(x)` to move between the two numeric
+types. `%` is `int`-only.
 
 ### Statements
 
@@ -171,8 +180,8 @@ Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 7. unary `-` `!`
 8. literals, `ident`, `a[i]`, `call(...)`, `[...]`, `( ... )`
 
-`==` / `!=` also work on `string` operands; `<` `<=` `>` `>=` and all
-arithmetic operators are `int`-only.
+`==` / `!=` work on `int`, `bool`, `float` and `string`; `<` `<=` `>` `>=`
+and `+` `-` `*` `/` work on two `int`s or two `float`s (never mixed).
 
 ### Comments
 
@@ -207,7 +216,7 @@ Division or modulo by zero prints
 
 ## Roadmap (not in v1.1)
 
-Pointers, structs, floats, heap allocation, modules, optimizations,
+Pointers, structs, heap allocation, modules, optimizations,
 definite-assignment analysis.
 
 ## Project layout

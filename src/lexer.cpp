@@ -1,6 +1,7 @@
 #include "lexer.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <unordered_map>
 
 namespace {
@@ -11,6 +12,7 @@ const std::unordered_map<std::string, TokenType>& keywords() {
         {"var", TokenType::KwVar},
         {"int", TokenType::KwInt},
         {"bool", TokenType::KwBool},
+        {"float", TokenType::KwFloat},
         {"string", TokenType::KwString},
         {"void", TokenType::KwVoid},
         {"return", TokenType::KwReturn},
@@ -92,13 +94,55 @@ Token Lexer::number() {
     int line = line_;
     int col = col_;
     std::string text;
-    while (std::isdigit(static_cast<unsigned char>(peek()))) {
+    bool isFloat = false;
+
+    auto digits = [&]() {
+        while (std::isdigit(static_cast<unsigned char>(peek()))) {
+            text.push_back(peek());
+            pos_++;
+            col_++;
+        }
+    };
+
+    digits();
+
+    // "1.5" is a float, but "0..10" must stay an int followed by ".."
+    if (peek() == '.' && std::isdigit(static_cast<unsigned char>(peek(1)))) {
+        isFloat = true;
         text.push_back(peek());
         pos_++;
         col_++;
+        digits();
     }
+
+    if (peek() == 'e' || peek() == 'E') {
+        isFloat = true;
+        text.push_back(peek());
+        pos_++;
+        col_++;
+        if (peek() == '+' || peek() == '-') {
+            text.push_back(peek());
+            pos_++;
+            col_++;
+        }
+        if (!std::isdigit(static_cast<unsigned char>(peek()))) {
+            throw LexError("invalid number literal", line, col);
+        }
+        digits();
+    }
+
     if (std::isalpha(static_cast<unsigned char>(peek())) || peek() == '_') {
         throw LexError("invalid number literal", line, col);
+    }
+
+    if (isFloat) {
+        double v = std::strtod(text.c_str(), nullptr);
+        if (!std::isfinite(v)) {
+            throw LexError("number literal out of range", line, col);
+        }
+        Token tok = make(TokenType::FloatLit, text, line, col);
+        tok.num = v;
+        return tok;
     }
     return make(TokenType::IntLit, text, line, col);
 }

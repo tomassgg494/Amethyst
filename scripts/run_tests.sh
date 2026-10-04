@@ -140,6 +140,55 @@ v1.2
 positive'
 check "strings output" "$expected_strings" "$out"
 
+# floats
+$BIN -o build/floats examples/floats.amt
+set +e
+out=$(./build/floats)
+rc=$?
+set -e
+expected_floats='3.5
+6
+1
+8.75
+1.4
+-3.5
+1
+1
+1
+12
+2.5
+5
+3
+2
+-2
+3.5'
+check "floats output" "$expected_floats" "$out"
+
+# IEEE-754: /0.0 gives inf/NaN instead of trapping, NaN is not equal to itself
+cat > build/ieee.amt <<'EOF'
+fn main() -> int {
+    var nan = 0.0 / 0.0;
+    print(1.0 / 0.0);
+    print(-1.0 / 0.0);
+    print(nan == nan);
+    print(nan != nan);
+    print(nan < 1.0);
+    print(1.0 / 0.0 > 1.0);
+    return 0;
+}
+EOF
+$BIN -o build/ieee build/ieee.amt
+set +e
+out=$(./build/ieee)
+rc=$?
+set -e
+check "IEEE-754 float edge cases" "inf
+-inf
+0
+1
+0
+1" "$out"
+
 # compound assignment + len()
 $BIN -o build/compound examples/compound.amt
 set +e
@@ -233,6 +282,44 @@ check "slice/stack argument ABI" "28
 75
 60
 2" "$out"
+
+# float ABI: 8 SSE registers, then the stack; ints and floats classified apart
+cat > build/fabi.amt <<'EOF'
+fn ten(a: float, b: float, c: float, d: float, e: float,
+       f: float, g: float, h: float, i: float, j: float) -> float {
+    return a + b + c + d + e + f + g + h + i + j;
+}
+
+fn mixed(a: float, b: int, c: float, d: int, e: float, f: int,
+         g: float, h: int, i: float, j: int) -> float {
+    return a + float(b) + c + float(d) + e + float(f) + g + float(h)
+           + i + float(j);
+}
+
+fn strs(s1: string, s2: string, x: float, n: int) -> float {
+    if s1 == s2 {
+        return x + float(n);
+    }
+    return x * float(n);
+}
+
+fn main() -> int {
+    print(ten(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0));
+    print(mixed(1.5, 10, 2.5, 20, 3.5, 30, 4.5, 40, 5.5, 50));
+    print(strs("a", "a", 2.5, 3));
+    print(strs("a", "b", 2.5, 3));
+    return 0;
+}
+EOF
+$BIN -o build/fabi build/fabi.amt
+set +e
+out=$(./build/fabi)
+rc=$?
+set -e
+check "float/stack argument ABI" "55
+167.5
+5.5
+7.5" "$out"
 
 # a slice is bounds-checked against its runtime length
 cat > build/sliceoob.amt <<'EOF'
@@ -384,6 +471,11 @@ expect_fail "slice element type" tests/err_slice_elem_type.amt "expected 'bool[]
 expect_fail "sized array parameter" tests/err_param_array_size.amt "array parameters must be written as 'int[]'"
 expect_fail "slice local variable" tests/err_slice_local.amt "local arrays need a fixed size"
 expect_fail "array copy" tests/err_array_copy.amt "must be initialized with an array literal"
+expect_fail "float + int" tests/err_float_int_mix.amt "operator expects two floats, got 'float' and 'int'"
+expect_fail "float modulo" tests/err_float_mod.amt "'%' has no float version"
+expect_fail "float array" tests/err_float_array.amt "array element type must be int or bool"
+expect_fail "float compared with int" tests/err_float_cmp_int.amt "cannot compare 'float' with 'int' with == / !="
+expect_fail "int() of an int" tests/err_float_conv.amt "'int' expects a float argument, got 'int'"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

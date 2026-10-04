@@ -271,13 +271,26 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             Type valueType = checkExpr(*stmt.expr);
             requireUsable(*stmt.expr, valueType, "assignment");
             if (stmt.compoundOp != TokenType::Eof) {
-                if (var->type != Type::Int || valueType != Type::Int) {
+                bool bothInt =
+                    var->type == Type::Int && valueType == Type::Int;
+                bool bothFloat =
+                    var->type == Type::Float && valueType == Type::Float;
+                if (!bothInt && !bothFloat) {
+                    if (var->type == Type::Float || valueType == Type::Float) {
+                        fail(std::string("'") +
+                                 compoundOpText(stmt.compoundOp) +
+                                 "' expects floats on both sides (got '" +
+                                 typeName(var->type) + "' and '" +
+                                 typeName(valueType) + "')",
+                             stmt.line, stmt.col);
+                    }
                     fail(std::string("'") + compoundOpText(stmt.compoundOp) +
                              "' expects int on both sides (got '" +
                              typeName(var->type) + "' and '" +
                              typeName(valueType) + "')",
                          stmt.line, stmt.col);
                 }
+                stmt.declaredType = var->type;  // codegen: int or float op
                 stmt.slot = var->slot;
                 break;
             }
@@ -427,8 +440,8 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
         case StmtKind::Print: {
             Type t = checkExpr(*stmt.expr);
             if (t == Type::Str) break;  // print("...") ok
-            if (t != Type::Int && t != Type::Bool) {
-                fail(std::string("print expects int, bool or string, got '") +
+            if (t != Type::Int && t != Type::Bool && t != Type::Float) {
+                fail(std::string("print expects int, bool, float or string, got '") +
                          typeName(t) + "'",
                      stmt.line, stmt.col);
             }
@@ -441,6 +454,9 @@ Type Sema::checkExpr(Expr& expr) {
     switch (expr.kind) {
         case ExprKind::IntLit:
             expr.type = Type::Int;
+            return expr.type;
+        case ExprKind::FloatLit:
+            expr.type = Type::Float;
             return expr.type;
         case ExprKind::BoolLit:
             expr.type = Type::Bool;
@@ -535,12 +551,12 @@ Type Sema::checkUnary(Expr& expr) {
             }
             return Type::Bool;
         case TokenType::Minus:
-            if (operand != Type::Int) {
-                fail(std::string("unary '-' expects int, got '") +
+            if (operand != Type::Int && operand != Type::Float) {
+                fail(std::string("unary '-' expects int or float, got '") +
                          typeName(operand) + "'",
                      expr.line, expr.col);
             }
-            return Type::Int;
+            return operand;
         default:
             fail("invalid unary operator", expr.line, expr.col);
     }
@@ -564,23 +580,52 @@ Type Sema::checkBinary(Expr& expr) {
                  expr.line, expr.col);
         }
     };
+    auto bothFloat = [&]() {
+        if (left != Type::Float || right != Type::Float) {
+            fail(std::string("operator expects two floats, got '") +
+                     typeName(left) + "' and '" + typeName(right) + "'",
+                 expr.line, expr.col);
+        }
+    };
 
     switch (expr.op) {
         case TokenType::Plus:
         case TokenType::Minus:
         case TokenType::Star:
         case TokenType::Slash:
+            if (left == Type::Float || right == Type::Float) {
+                bothFloat();
+                return Type::Float;
+            }
+            bothInt();
+            return Type::Int;
         case TokenType::Percent:
+            if (left == Type::Float || right == Type::Float) {
+                fail("'%' has no float version (use int(x) to truncate)",
+                     expr.line, expr.col);
+            }
             bothInt();
             return Type::Int;
         case TokenType::Lt:
         case TokenType::Le:
         case TokenType::Gt:
         case TokenType::Ge:
+            if (left == Type::Float || right == Type::Float) {
+                bothFloat();
+                return Type::Bool;
+            }
             bothInt();
             return Type::Bool;
         case TokenType::EqEq:
         case TokenType::NotEq:
+            if (left == Type::Float || right == Type::Float) {
+                if (left != right) {
+                    fail(std::string("cannot compare '") + typeName(left) +
+                             "' with '" + typeName(right) + "' with == / !=",
+                         expr.line, expr.col);
+                }
+                return Type::Bool;
+            }
             if (left == Type::Str) {
                 if (right != Type::Str) {
                     fail(std::string("cannot compare 'string' with '") +
@@ -629,6 +674,30 @@ Type Sema::checkCall(Expr& expr) {
         // strings always need strlen at runtime
         expr.arraySize =
             argType == Type::Str ? -1 : expr.args[0]->arraySize;
+        return Type::Int;
+    }
+
+    // int(x) / float(x): the only conversions (no implicit widening)
+    if (expr.name == "int" || expr.name == "float") {
+        if (expr.args.size() != 1) {
+            fail("'" + expr.name + "' expects 1 argument(s), got " +
+                     std::to_string(expr.args.size()),
+                 expr.line, expr.col);
+        }
+        Type argType = checkExpr(*expr.args[0]);
+        if (expr.name == "float") {
+            if (argType != Type::Int) {
+                fail(std::string("'float' expects an int argument, got '") +
+                         typeName(argType) + "'",
+                     expr.args[0]->line, expr.args[0]->col);
+            }
+            return Type::Float;
+        }
+        if (argType != Type::Float) {
+            fail(std::string("'int' expects a float argument, got '") +
+                     typeName(argType) + "'",
+                 expr.args[0]->line, expr.args[0]->col);
+        }
         return Type::Int;
     }
 

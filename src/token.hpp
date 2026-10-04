@@ -4,12 +4,14 @@
 
 enum class TokenType {
     IntLit,
+    FloatLit,
     Ident,
 
     KwFn,
     KwVar,
     KwInt,
     KwBool,
+    KwFloat,
     KwString,
     KwVoid,
     KwReturn,
@@ -69,6 +71,7 @@ struct Token {
     std::string text;
     int line = 0;
     int col = 0;
+    double num = 0.0;  // FloatLit value (text keeps the source spelling)
 };
 
 // Source spelling of a compound assignment operator ("" if not one).

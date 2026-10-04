@@ -1,0 +1,5 @@
+fn main() -> int {
+    var a: float[2] = [1.0, 2.0];
+    print(a[0]);
+    return 0;
+}
