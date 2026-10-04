@@ -25,6 +25,8 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    .string \"%ld\\n\"\n";
     out_ += ".fmt_bounds:\n";
     out_ += "    .string \"Amethyst runtime error: index %ld out of bounds for array of size %ld\\n\"\n";
+    out_ += ".fmt_divzero:\n";
+    out_ += "    .string \"Amethyst runtime error: division by zero\\n\"\n";
     out_ += ".text\n";
 
     // shared bounds-failure handler (never returns)
@@ -40,6 +42,18 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    movl $1, %edi\n";
     out_ += "    call exit@PLT\n";
     out_ += ".size __amethyst_bounds_fail, .-__amethyst_bounds_fail\n";
+
+    // shared division-by-zero handler (never returns)
+    out_ += ".globl __amethyst_div_fail\n";
+    out_ += ".type __amethyst_div_fail, @function\n";
+    out_ += "__amethyst_div_fail:\n";
+    out_ += "    subq $8, %rsp\n";            // entry rsp ≡ 8 (mod 16) → align for printf
+    out_ += "    leaq .fmt_divzero(%rip), %rdi\n";
+    out_ += "    xorl %eax, %eax\n";
+    out_ += "    call printf@PLT\n";
+    out_ += "    movl $1, %edi\n";
+    out_ += "    call exit@PLT\n";
+    out_ += ".size __amethyst_div_fail, .-__amethyst_div_fail\n";
 
     for (const auto& fn : program.functions) {
         emitFunction(fn, program);
@@ -125,6 +139,54 @@ void Codegen::emitBoundsCheck(long long size) {
     out_ += okL + ":\n";
 }
 
+void Codegen::emitDivGuard() {
+    // divisor in %rcx
+    std::string okL = newLabel("div_ok");
+
+    out_ += "    testq %rcx, %rcx\n";
+    out_ += "    jne " + okL + "\n";
+    // Force 16-byte alignment regardless of live pushes, then call (noreturn).
+    out_ += "    movq %rsp, %r11\n";
+    out_ += "    andq $-16, %rsp\n";
+    out_ += "    call __amethyst_div_fail@PLT\n";
+    out_ += "    movq %r11, %rsp\n";
+    out_ += okL + ":\n";
+}
+
+void Codegen::emitIntOp(TokenType op) {
+    // lhs in %rax, rhs in %rcx → result in %rax
+    // accepts both the plain and the compound spelling of the operator
+    switch (op) {
+        case TokenType::Plus:
+        case TokenType::PlusEq:
+            out_ += "    addq %rcx, %rax\n";
+            break;
+        case TokenType::Minus:
+        case TokenType::MinusEq:
+            out_ += "    subq %rcx, %rax\n";
+            break;
+        case TokenType::Star:
+        case TokenType::StarEq:
+            out_ += "    imulq %rcx, %rax\n";
+            break;
+        case TokenType::Slash:
+        case TokenType::SlashEq:
+            emitDivGuard();
+            out_ += "    cqto\n";
+            out_ += "    idivq %rcx\n";
+            break;
+        case TokenType::Percent:
+        case TokenType::PercentEq:
+            emitDivGuard();
+            out_ += "    cqto\n";
+            out_ += "    idivq %rcx\n";
+            out_ += "    movq %rdx, %rax\n";
+            break;
+        default:
+            break;
+    }
+}
+
 void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
     switch (stmt.kind) {
         case StmtKind::Block: {
@@ -150,6 +212,20 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
         }
 
         case StmtKind::Assign: {
+            if (stmt.compoundOp != TokenType::Eof) {
+                // evaluate rhs, stash it, load lhs, combine, store
+                emitExpr(*stmt.expr);
+                out_ += "    pushq %rax\n";
+                stackDepth_++;
+                out_ += "    movq " +
+                        std::to_string(slotOffset(stmt.slot)) + "(%rbp), %rax\n";
+                out_ += "    popq %rcx\n";
+                stackDepth_--;
+                emitIntOp(stmt.compoundOp);
+                out_ += "    movq %rax, " +
+                        std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
+                break;
+            }
             emitExpr(*stmt.expr);
             out_ += "    movq %rax, " +
                     std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
@@ -168,6 +244,20 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
                     std::to_string(slotOffset(stmt.target->slot)) +
                     "(%rbp), %rcx\n";
             out_ += "    subq %rax, %rcx\n";  // rcx = &elem
+            if (stmt.compoundOp != TokenType::Eof) {
+                // stack: [rhs, &elem]; read old, combine with rhs, write back
+                out_ += "    pushq %rcx\n";
+                stackDepth_++;
+                out_ += "    movq (%rcx), %rax\n";    // old value
+                out_ += "    movq 8(%rsp), %rcx\n";   // rhs
+                emitIntOp(stmt.compoundOp);
+                out_ += "    popq %rcx\n";            // &elem
+                stackDepth_--;
+                out_ += "    movq %rax, (%rcx)\n";
+                out_ += "    addq $8, %rsp\n";        // drop saved rhs
+                stackDepth_--;
+                break;
+            }
             out_ += "    popq %rax\n";        // value
             stackDepth_--;
             out_ += "    movq %rax, (%rcx)\n";
@@ -388,10 +478,12 @@ void Codegen::emitExpr(const Expr& expr) {
                     out_ += "    imulq %rcx, %rax\n";
                     break;
                 case TokenType::Slash:
+                    emitDivGuard();
                     out_ += "    cqto\n";
                     out_ += "    idivq %rcx\n";
                     break;
                 case TokenType::Percent:
+                    emitDivGuard();
                     out_ += "    cqto\n";
                     out_ += "    idivq %rcx\n";
                     out_ += "    movq %rdx, %rax\n";
@@ -448,6 +540,18 @@ void Codegen::emitExprBool(const Expr& expr) {
 
 void Codegen::emitCall(const Expr& expr) {
     static const char* argRegs[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+
+    if (expr.name == "len") {
+        if (expr.arraySize >= 0) {
+            out_ += "    movq $" + std::to_string(expr.arraySize) + ", %rax\n";
+        } else {
+            // slice: length lives in the slot right below the pointer
+            out_ += "    movq " +
+                    std::to_string(slotOffset(expr.args[0]->slot) - 8) +
+                    "(%rbp), %rax\n";
+        }
+        return;
+    }
 
     size_t n = expr.args.size();
     size_t stackArgs = n > 6 ? n - 6 : 0;

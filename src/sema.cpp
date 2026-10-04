@@ -11,6 +11,13 @@ void Sema::pushScope() {
 }
 
 void Sema::popScope() {
+    for (auto& v : scopes_.back().vars) {
+        if (!v.second.used && !v.second.isParam) {
+            warnings_.push_back(
+                {v.second.declLine, v.second.declCol,
+                 "unused variable '" + v.first + "' (declared but never referenced)"});
+        }
+    }
     scopes_.pop_back();
 }
 
@@ -30,7 +37,10 @@ void Sema::declare(const std::string& name, const VarInfo& info, int line, int c
             fail("redeclaration of '" + name + "' in the same scope", line, col);
         }
     }
-    scope.vars.emplace_back(name, info);
+    VarInfo stored = info;
+    stored.declLine = line;
+    stored.declCol = col;
+    scope.vars.emplace_back(name, stored);
 }
 
 void Sema::collectFunctions(Program& program) {
@@ -38,6 +48,9 @@ void Sema::collectFunctions(Program& program) {
     fnNames_.clear();
     for (size_t i = 0; i < program.functions.size(); ++i) {
         FnDecl& fn = program.functions[i];
+        if (fn.name == "len") {
+            fail("'len' is a builtin and cannot be redefined", fn.line, fn.col);
+        }
         for (const auto& existing : fnNames_) {
             if (existing == fn.name) {
                 fail("redefinition of function '" + fn.name + "'", fn.line, fn.col);
@@ -66,6 +79,7 @@ void Sema::checkMain(Program& program) {
 }
 
 void Sema::analyze(Program& program) {
+    warnings_.clear();
     collectFunctions(program);
     checkMain(program);
     for (auto& fn : program.functions) {
@@ -81,7 +95,9 @@ void Sema::checkFunction(FnDecl& fn) {
 
     for (auto& p : fn.params) {
         p.slot = nextSlot_++;
-        declare(p.name, VarInfo{p.type, p.slot, 0}, p.line, p.col);
+        VarInfo pi{p.type, p.slot, 0};
+        pi.isParam = true;
+        declare(p.name, pi, p.line, p.col);
     }
 
     if (fn.body == nullptr || fn.body->kind != StmtKind::Block) {
@@ -119,10 +135,38 @@ bool Sema::stmtAlwaysReturns(const Stmt& stmt) const {
     }
 }
 
+bool Sema::stmtAlwaysTerminates(const Stmt& stmt) const {
+    switch (stmt.kind) {
+        case StmtKind::Return:
+        case StmtKind::Break:
+        case StmtKind::Continue:
+            return true;
+        case StmtKind::Block:
+            for (const auto& s : stmt.stmts) {
+                if (stmtAlwaysTerminates(*s)) return true;
+            }
+            return false;
+        case StmtKind::If:
+            if (!stmt.thenBlock || !stmtAlwaysTerminates(*stmt.thenBlock)) {
+                return false;
+            }
+            if (!stmt.elseBlock) return false;
+            return stmtAlwaysTerminates(*stmt.elseBlock);
+        default:
+            return false;
+    }
+}
+
 void Sema::checkBlock(Stmt& block, Type fnReturn) {
     pushScope();
-    for (auto& s : block.stmts) {
-        checkStmt(*s, fnReturn);
+    for (size_t i = 0; i < block.stmts.size(); ++i) {
+        checkStmt(*block.stmts[i], fnReturn);
+        if (i + 1 < block.stmts.size() &&
+            stmtAlwaysTerminates(*block.stmts[i])) {
+            warnings_.push_back({block.stmts[i + 1]->line,
+                                 block.stmts[i + 1]->col,
+                                 "unreachable code"});
+        }
     }
     popScope();
 }
@@ -210,6 +254,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 fail("assignment to undeclared variable '" + stmt.name + "'",
                      stmt.line, stmt.col);
             }
+            var->used = true;
             if (isArrayType(var->type)) {
                 fail("cannot assign to whole array '" + stmt.name +
                          "' (assign elements: " + stmt.name + "[i] = ...)",
@@ -217,6 +262,17 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             }
             Type valueType = checkExpr(*stmt.expr);
             requireUsable(*stmt.expr, valueType, "assignment");
+            if (stmt.compoundOp != TokenType::Eof) {
+                if (var->type != Type::Int || valueType != Type::Int) {
+                    fail(std::string("'") + compoundOpText(stmt.compoundOp) +
+                             "' expects int on both sides (got '" +
+                             typeName(var->type) + "' and '" +
+                             typeName(valueType) + "')",
+                         stmt.line, stmt.col);
+                }
+                stmt.slot = var->slot;
+                break;
+            }
             if (valueType != var->type) {
                 fail(std::string("cannot assign '") + typeName(valueType) +
                          "' to variable '" + stmt.name + "' of type '" +
@@ -240,6 +296,17 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             if (!isArrayType(baseType)) {
                 fail("cannot index-assign into a non-array value", stmt.line,
                      stmt.col);
+            }
+            if (stmt.compoundOp != TokenType::Eof) {
+                if (elemType != Type::Int || valueType != Type::Int) {
+                    fail(std::string("'") + compoundOpText(stmt.compoundOp) +
+                             "' expects int on both sides (got '" +
+                             typeName(elemType) + "' and '" +
+                             typeName(valueType) + "')",
+                         stmt.line, stmt.col);
+                }
+                stmt.slot = stmt.target->slot;
+                break;
             }
             if (valueType != elemType) {
                 fail(std::string("cannot assign '") + typeName(valueType) +
@@ -402,6 +469,7 @@ Type Sema::checkIdent(Expr& expr) {
         fail("use of undeclared variable '" + expr.name + "'", expr.line,
              expr.col);
     }
+    var->used = true;
     expr.slot = var->slot;
     expr.arraySize = var->arraySize;
     return var->type;
@@ -528,6 +596,23 @@ Type Sema::checkCall(Expr& expr) {
     if (expr.name == "print") {
         fail("print is a statement, not a function; use print(expr);",
              expr.line, expr.col);
+    }
+
+    if (expr.name == "len") {
+        if (expr.args.size() != 1) {
+            fail("'len' expects 1 argument(s), got " +
+                     std::to_string(expr.args.size()),
+                 expr.line, expr.col);
+        }
+        Type argType = checkExpr(*expr.args[0]);
+        if (!isArrayType(argType)) {
+            fail(std::string("'len' expects an array argument, got '") +
+                     typeName(argType) + "'",
+                 expr.args[0]->line, expr.args[0]->col);
+        }
+        // 0 ≥ 0 → size known at compile time; -1 → runtime length (slice)
+        expr.arraySize = expr.args[0]->arraySize;
+        return Type::Int;
     }
 
     for (size_t i = 0; i < fnNames_.size(); ++i) {

@@ -75,7 +75,7 @@ fn fib(n: int) -> int {
 fn main() -> int {
     var nums: int[5] = [10, 20, 30, 40, 50];
 
-    for i in 0..5 {
+    for i in 0..len(nums) {
         if nums[i] % 2 != 0 {
             continue;
         }
@@ -83,8 +83,8 @@ fn main() -> int {
     }
 
     var total = 0;  // type inferred from initializer
-    for i in 0..5 {
-        total = total + nums[i];
+    for i in 0..len(nums) {
+        total += nums[i];
     }
     print(total);
 
@@ -102,10 +102,17 @@ fn main() -> int {
 | `var x = expr;` | Type inference from initializer |
 | `var a: int[10] = [1, 2, ...];` | Fixed-size array (element type `int` or `bool`) |
 | `x = expr;` | Assignment |
+| `x += expr;` | Compound assignment: `+=` `-=` `*=` `/=` `%=` (also on `a[i]`) |
 | `a[i] = expr;` | Array element assignment |
 | `print(expr);` | Print `int`, `bool`, or a string literal |
 
 Entry point: `fn main() -> int` (no parameters).
+
+### Builtins
+
+| Form | Meaning |
+|------|---------|
+| `len(a)` | number of elements of an array; result is a plain `int`, so `for i in 0..len(a)` works |
 
 ### Types
 
@@ -119,7 +126,8 @@ No implicit conversions: `int` and `bool` never mix.
 
 ### Statements
 
-`var` (with optional inference), assignment, array element assignment,
+`var` (with optional inference), assignment, compound assignment
+(`+=` `-=` `*=` `/=` `%=`), array element assignment,
 `if` / `else if` / `else`, `while`, `for i in a..b` (half-open range),
 `break`, `continue`, `return`, `print`, nested `{ }` blocks, expression
 statements.
@@ -156,12 +164,17 @@ Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 - Register args: `rdi rsi rdx rcx r8 r9`; further args on the stack (copied into the frame on entry).
 - `print` lowers to `printf("%ld\n", ...)`.
 
-Errors are reported as `file:line:col: error: message`.
+Errors are reported as `file:line:col: error: message`. Warnings
+(`unused variable`, `unreachable code`) use the same prefix with `warning:`
+and are printed to stderr without stopping the build.
 
 Non-void functions must return on all control paths (checked for `return`, blocks, and `if`/`else`; `while` alone does not count as returning).
 
 Array out-of-bounds access is caught at runtime: prints
 `Amethyst runtime error: index N out of bounds for array of size M` and exits 1.
+
+Division or modulo by zero prints
+`Amethyst runtime error: division by zero` and exits 1.
 
 ## Roadmap (not in v1.1)
 

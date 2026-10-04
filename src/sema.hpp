@@ -12,9 +12,16 @@ struct SemaError : std::runtime_error {
         : std::runtime_error(msg), line(line), col(col) {}
 };
 
+struct SemaWarning {
+    int line;
+    int col;
+    std::string msg;
+};
+
 class Sema {
 public:
     void analyze(Program& program);
+    const std::vector<SemaWarning>& warnings() const { return warnings_; }
 
 private:
     void collectFunctions(Program& program);
@@ -31,6 +38,10 @@ private:
         Type type;
         int slot;
         int arraySize = 0;  // for array vars
+        int declLine = 0;
+        int declCol = 0;
+        bool used = false;   // referenced after declaration (read or assigned)
+        bool isParam = false;
     };
 
     struct Scope {
@@ -45,6 +56,7 @@ private:
     void checkStmt(Stmt& stmt, Type fnReturn);
     void checkBlock(Stmt& block, Type fnReturn);
     bool stmtAlwaysReturns(const Stmt& stmt) const;
+    bool stmtAlwaysTerminates(const Stmt& stmt) const;
     Type checkExpr(Expr& expr);
     Type checkBinary(Expr& expr);
     Type checkUnary(Expr& expr);
@@ -61,6 +73,7 @@ private:
     std::vector<FnInfo> fnInfos_;
     std::vector<std::string> fnNames_;
     std::vector<Scope> scopes_;
+    std::vector<SemaWarning> warnings_;
     int nextSlot_ = 0;
     int loopDepth_ = 0;
 };

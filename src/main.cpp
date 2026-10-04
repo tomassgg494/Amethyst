@@ -101,6 +101,10 @@ int main(int argc, char** argv) {
 
         Sema sema;
         sema.analyze(program);
+        for (const auto& w : sema.warnings()) {
+            std::cerr << input << ":" << w.line << ":" << w.col
+                      << ": warning: " << w.msg << "\n";
+        }
 
         Codegen codegen;
         std::string asmText = codegen.emit(program);

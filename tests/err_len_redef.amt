@@ -1,0 +1,7 @@
+fn len(a: int) -> int {
+    return a;
+}
+
+fn main() -> int {
+    return 0;
+}

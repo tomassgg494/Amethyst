@@ -210,31 +210,36 @@ StmtPtr Parser::parsePrint() {
 }
 
 StmtPtr Parser::parseAssignOrExprStmt() {
-    if (check(TokenType::Ident) && peek(1).type == TokenType::Assign) {
+    if (check(TokenType::Ident) && isAssignOp(peek(1).type)) {
         const Token& nameTok = advance();
-        advance();  // '='
+        const TokenType op = advance().type;  // '=' or compound operator
         ExprPtr value = parseExpression();
         expect(TokenType::Semicolon, "';' after assignment");
-        return Stmt::makeAssign(nameTok.text, std::move(value), nameTok.line, nameTok.col);
+        return Stmt::makeAssign(nameTok.text, std::move(value), nameTok.line,
+                                nameTok.col,
+                                op == TokenType::Assign ? TokenType::Eof : op);
     }
 
-    // arr[i] = value;
+    // arr[i] = value;  /  arr[i] += value;
     if (check(TokenType::Ident) && peek(1).type == TokenType::LBracket) {
-        // Peek ahead: Ident '[' ... ']' '='  → index assignment
+        // Peek ahead: Ident '[' ... ']' <assign-op>  → index assignment
         size_t save = pos_;
         const Token& nameTok = advance();  // ident
         advance();                          // '['
         // parse index expression from current position
         ExprPtr index = parseExpression();
         expect(TokenType::RBracket, "']' after index");
-        if (match(TokenType::Assign)) {
+        if (isAssignOp(peek().type)) {
+            const TokenType raw = advance().type;
+            const TokenType op =
+                raw == TokenType::Assign ? TokenType::Eof : raw;
             ExprPtr base = Expr::makeIdent(nameTok.text, nameTok.line, nameTok.col);
             ExprPtr target =
                 Expr::makeIndex(std::move(base), std::move(index), nameTok.line, nameTok.col);
             ExprPtr value = parseExpression();
             expect(TokenType::Semicolon, "';' after assignment");
             return Stmt::makeAssignIndex(std::move(target), std::move(value),
-                                         nameTok.line, nameTok.col);
+                                         nameTok.line, nameTok.col, op);
         }
         // Not an assignment: rewind and parse as expression statement.
         pos_ = save;

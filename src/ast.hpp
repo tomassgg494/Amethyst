@@ -192,6 +192,9 @@ struct Stmt {
     int declaredSize = 0;            // VarDecl arrays: N in int[N]
     bool typeInferred = false;       // VarDecl: written as `var x = e`
 
+    // Assign / AssignIndex: Eof for plain '=', otherwise the compound operator
+    TokenType compoundOp = TokenType::Eof;
+
     // VarDecl / Assign / Return / ExprStmt / Print / If-cond / While-cond /
     // For range start (expr) and end (exprEnd)
     ExprPtr expr;
@@ -227,20 +230,24 @@ struct Stmt {
         s->col = col;
         return s;
     }
-    static StmtPtr makeAssign(std::string name, ExprPtr value, int line, int col) {
+    static StmtPtr makeAssign(std::string name, ExprPtr value, int line, int col,
+                              TokenType compoundOp = TokenType::Eof) {
         auto s = std::make_unique<Stmt>();
         s->kind = StmtKind::Assign;
         s->name = std::move(name);
         s->expr = std::move(value);
+        s->compoundOp = compoundOp;
         s->line = line;
         s->col = col;
         return s;
     }
-    static StmtPtr makeAssignIndex(ExprPtr target, ExprPtr value, int line, int col) {
+    static StmtPtr makeAssignIndex(ExprPtr target, ExprPtr value, int line, int col,
+                                   TokenType compoundOp = TokenType::Eof) {
         auto s = std::make_unique<Stmt>();
         s->kind = StmtKind::AssignIndex;
         s->target = std::move(target);
         s->value = std::move(value);
+        s->compoundOp = compoundOp;
         s->line = line;
         s->col = col;
         return s;

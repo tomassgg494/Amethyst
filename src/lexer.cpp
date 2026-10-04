@@ -170,23 +170,41 @@ std::vector<Token> Lexer::tokenize() {
         col_++;
         switch (c) {
             case '+':
-                tokens.push_back(make(TokenType::Plus, "+", line, col));
+                if (match('=')) {
+                    tokens.push_back(make(TokenType::PlusEq, "+=", line, col));
+                } else {
+                    tokens.push_back(make(TokenType::Plus, "+", line, col));
+                }
                 break;
             case '-':
                 if (match('>')) {
                     tokens.push_back(make(TokenType::Arrow, "->", line, col));
+                } else if (match('=')) {
+                    tokens.push_back(make(TokenType::MinusEq, "-=", line, col));
                 } else {
                     tokens.push_back(make(TokenType::Minus, "-", line, col));
                 }
                 break;
             case '*':
-                tokens.push_back(make(TokenType::Star, "*", line, col));
+                if (match('=')) {
+                    tokens.push_back(make(TokenType::StarEq, "*=", line, col));
+                } else {
+                    tokens.push_back(make(TokenType::Star, "*", line, col));
+                }
                 break;
             case '/':
-                tokens.push_back(make(TokenType::Slash, "/", line, col));
+                if (match('=')) {
+                    tokens.push_back(make(TokenType::SlashEq, "/=", line, col));
+                } else {
+                    tokens.push_back(make(TokenType::Slash, "/", line, col));
+                }
                 break;
             case '%':
-                tokens.push_back(make(TokenType::Percent, "%", line, col));
+                if (match('=')) {
+                    tokens.push_back(make(TokenType::PercentEq, "%=", line, col));
+                } else {
+                    tokens.push_back(make(TokenType::Percent, "%", line, col));
+                }
                 break;
             case '=':
                 if (match('=')) {

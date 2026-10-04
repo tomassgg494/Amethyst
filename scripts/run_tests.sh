@@ -133,6 +133,43 @@ n is:
 positive'
 check "strings output" "$expected_strings" "$out"
 
+# compound assignment + len()
+$BIN -o build/compound examples/compound.amt
+set +e
+out=$(./build/compound)
+rc=$?
+set -e
+expected_compound="4
+4
+10
+21
+32
+43
+106"
+check "compound output" "$expected_compound" "$out"
+
+# warnings are reported on stderr but do not fail the compilation
+cat > build/warn.amt <<'EOF'
+fn main() -> int {
+    var unused = 42;
+    var x = 1;
+    return x;
+    print(999);
+}
+EOF
+set +e
+err=$($BIN -o build/warn build/warn.amt 2>&1)
+rc=$?
+set -e
+if [[ $rc -eq 0 && "$err" == *"warning: unused variable"* && "$err" == *"warning: unreachable code"* ]]; then
+  PASS=$((PASS + 1))
+  echo "  PASS  sema warnings (non-fatal)"
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL  sema warnings (rc=$rc)"
+  echo "        err: $err"
+fi
+
 # runtime bounds check (index OOB → exit 1 + message)
 mkdir -p build
 cat > build/oob.amt <<'EOF'
@@ -155,6 +192,40 @@ else
   echo "  FAIL  runtime bounds check (rc=$rc)"
   echo "        err: $err"
 fi
+
+# runtime division / modulo by zero → exit 1 + message
+expect_divzero() {
+  local name="$1"
+  local body="$2"
+  cat > build/divzero.amt <<EOF
+fn main() -> int {
+    var z = 0;
+$body
+    return 0;
+}
+EOF
+  $BIN -o build/divzero build/divzero.amt
+  set +e
+  err=$(./build/divzero 2>&1)
+  rc=$?
+  set -e
+  if [[ $rc -eq 1 && "$err" == *"division by zero"* ]]; then
+    PASS=$((PASS + 1))
+    echo "  PASS  $name"
+  else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL  $name (rc=$rc)"
+    echo "        err: $err"
+  fi
+}
+
+expect_divzero "runtime division by zero" "    var n = 10 / z;
+    print(n);"
+expect_divzero "runtime modulo by zero" "    var n = 10 % z;
+    print(n);"
+expect_divzero "runtime /= by zero" "    var n = 10;
+    n /= z;
+    print(n);"
 
 echo "== error cases =="
 
@@ -189,6 +260,10 @@ expect_fail "index non-array" tests/err_index_nonarray.amt "cannot index into a 
 expect_fail "array size mismatch" tests/err_array_size.amt "array size mismatch"
 expect_fail "array elem type" tests/err_array_elem_type.amt "array element 2 has type 'bool'"
 expect_fail "string in var" tests/err_string_var.amt "cannot store a string"
+expect_fail "compound on bool" tests/err_compound_bool.amt "'+=' expects int on both sides"
+expect_fail "len of non-array" tests/err_len_nonarray.amt "'len' expects an array argument"
+expect_fail "len arity" tests/err_len_arity.amt "'len' expects 1 argument(s), got 0"
+expect_fail "len redefinition" tests/err_len_redef.amt "'len' is a builtin and cannot be redefined"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
