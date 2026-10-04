@@ -78,6 +78,9 @@ private:
     Type checkIndex(Expr& expr);
     Type checkArrayLit(Expr& expr);
 
+    // Display name of a type, with the program's struct table behind it.
+    std::string tyName(const Type& t) const;
+
     // Reject types that may not appear in general expression positions.
     void requireUsable(const Expr& expr, Type t, const char* what);
 
@@ -87,6 +90,7 @@ private:
     std::vector<std::string> fnNames_;
     std::vector<Scope> scopes_;
     std::vector<SemaWarning> warnings_;
+    const Program* program_ = nullptr;  // valid for the current analyze()
     int nextSlot_ = 0;
     int loopDepth_ = 0;
 };

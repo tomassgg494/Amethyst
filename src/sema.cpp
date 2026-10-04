@@ -3,13 +3,17 @@
 #include <algorithm>
 
 // `int[]` is the generic (slice) spelling; locals are printed as `int[10]`.
-static std::string fixedArrayName(Type t, int n) {
-    return std::string(t == Type::ArrayBool ? "bool" : "int") + "[" +
-           std::to_string(n) + "]";
+static std::string fixedArrayName(const Type& elem, int n) {
+    return typeName(elem, {}) + "[" + std::to_string(n) + "]";
 }
 
 void Sema::fail(const std::string& msg, int line, int col) const {
     throw SemaError(msg, line, col);
+}
+
+std::string Sema::tyName(const Type& t) const {
+    static const std::vector<StructDecl> noStructs;
+    return typeName(t, program_ ? program_->structs : noStructs);
 }
 
 void Sema::pushScope() {
@@ -119,6 +123,7 @@ void Sema::checkMain(Program& program) {
 
 void Sema::analyze(Program& program) {
     warnings_.clear();
+    program_ = &program;
     collectFunctions(program);
     checkMain(program);
     for (auto& fn : program.functions) {
@@ -257,10 +262,10 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             } else if (isArrayType(stmt.declaredType)) {
                 if (initType != stmt.declaredType) {
                     fail(std::string("cannot initialize '") +
-                             fixedArrayName(stmt.declaredType,
+                             fixedArrayName(stmt.declaredType.element(),
                                             stmt.declaredSize) +
                              " " + stmt.name + "' with value of type '" +
-                             typeName(initType) + "'",
+                             tyName(initType) + "'",
                          stmt.line, stmt.col);
                 }
                 if (stmt.expr->arraySize != stmt.declaredSize) {
@@ -272,14 +277,14 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             } else {
                 if (initType == Type::Str && stmt.declaredType != Type::Str) {
                     fail(std::string("cannot initialize '") +
-                             typeName(stmt.declaredType) + " " + stmt.name +
+                             tyName(stmt.declaredType) + " " + stmt.name +
                              "' with a string literal",
                          stmt.line, stmt.col);
                 }
                 if (initType != stmt.declaredType) {
                     fail(std::string("cannot initialize '") +
-                             typeName(stmt.declaredType) + " " + stmt.name +
-                             "' with value of type '" + typeName(initType) + "'",
+                             tyName(stmt.declaredType) + " " + stmt.name +
+                             "' with value of type '" + tyName(initType) + "'",
                          stmt.line, stmt.col);
                 }
             }
@@ -327,14 +332,14 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                         fail(std::string("'") +
                                  compoundOpText(stmt.compoundOp) +
                                  "' expects floats on both sides (got '" +
-                                 typeName(var->type) + "' and '" +
-                                 typeName(valueType) + "')",
+                                 tyName(var->type) + "' and '" +
+                                 tyName(valueType) + "')",
                              stmt.line, stmt.col);
                     }
                     fail(std::string("'") + compoundOpText(stmt.compoundOp) +
                              "' expects int on both sides (got '" +
-                             typeName(var->type) + "' and '" +
-                             typeName(valueType) + "')",
+                             tyName(var->type) + "' and '" +
+                             tyName(valueType) + "')",
                          stmt.line, stmt.col);
                 }
                 stmt.declaredType = var->type;  // codegen: int or float op
@@ -343,9 +348,9 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 break;
             }
             if (valueType != var->type) {
-                fail(std::string("cannot assign '") + typeName(valueType) +
+                fail(std::string("cannot assign '") + tyName(valueType) +
                          "' to variable '" + stmt.name + "' of type '" +
-                         typeName(var->type) + "'",
+                         tyName(var->type) + "'",
                      stmt.line, stmt.col);
             }
             stmt.slot = var->slot;
@@ -371,16 +376,16 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 if (elemType != Type::Int || valueType != Type::Int) {
                     fail(std::string("'") + compoundOpText(stmt.compoundOp) +
                              "' expects int on both sides (got '" +
-                             typeName(elemType) + "' and '" +
-                             typeName(valueType) + "')",
+                             tyName(elemType) + "' and '" +
+                             tyName(valueType) + "')",
                          stmt.line, stmt.col);
                 }
                 stmt.slot = stmt.target->slot;
                 break;
             }
             if (valueType != elemType) {
-                fail(std::string("cannot assign '") + typeName(valueType) +
-                         "' to array element of type '" + typeName(elemType) + "'",
+                fail(std::string("cannot assign '") + tyName(valueType) +
+                         "' to array element of type '" + tyName(elemType) + "'",
                      stmt.line, stmt.col);
             }
             stmt.slot = stmt.target->slot;
@@ -391,7 +396,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             Type cond = checkExpr(*stmt.expr);
             if (cond != Type::Bool) {
                 fail(std::string("if condition must be bool, got '") +
-                         typeName(cond) + "'",
+                         tyName(cond) + "'",
                      stmt.line, stmt.col);
             }
             FlowState before = snapshotFlow();
@@ -429,7 +434,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             Type cond = checkExpr(*stmt.expr);
             if (cond != Type::Bool) {
                 fail(std::string("while condition must be bool, got '") +
-                         typeName(cond) + "'",
+                         tyName(cond) + "'",
                      stmt.line, stmt.col);
             }
             FlowState before = snapshotFlow();
@@ -446,12 +451,12 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             Type endT = checkExpr(*stmt.exprEnd);
             if (startT != Type::Int) {
                 fail(std::string("for range start must be int, got '") +
-                         typeName(startT) + "'",
+                         tyName(startT) + "'",
                      stmt.line, stmt.col);
             }
             if (endT != Type::Int) {
                 fail(std::string("for range end must be int, got '") +
-                         typeName(endT) + "'",
+                         tyName(endT) + "'",
                      stmt.line, stmt.col);
             }
 
@@ -499,8 +504,8 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 }
                 if (valueType != fnReturn) {
                     fail(std::string("return type mismatch: expected '") +
-                             typeName(fnReturn) + "', got '" +
-                             typeName(valueType) + "'",
+                             tyName(fnReturn) + "', got '" +
+                             tyName(valueType) + "'",
                          stmt.line, stmt.col);
                 }
             }
@@ -518,7 +523,7 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             if (t == Type::Str) break;  // print("...") ok
             if (t != Type::Int && t != Type::Bool && t != Type::Float) {
                 fail(std::string("print expects int, bool, float or string, got '") +
-                         typeName(t) + "'",
+                         tyName(t) + "'",
                      stmt.line, stmt.col);
             }
             break;
@@ -587,20 +592,20 @@ Type Sema::checkArrayLit(Expr& expr) {
     Type elem = checkExpr(*expr.args[0]);
     if (elem != Type::Int && elem != Type::Bool) {
         fail(std::string("array elements must be int or bool, got '") +
-                 typeName(elem) + "'",
+                 tyName(elem) + "'",
              expr.args[0]->line, expr.args[0]->col);
     }
     for (size_t i = 1; i < expr.args.size(); ++i) {
         Type t = checkExpr(*expr.args[i]);
         if (t != elem) {
             fail(std::string("array element ") + std::to_string(i + 1) +
-                     " has type '" + typeName(t) + "', expected '" +
-                     typeName(elem) + "' (all elements must match)",
+                     " has type '" + tyName(t) + "', expected '" +
+                     tyName(elem) + "' (all elements must match)",
                  expr.args[i]->line, expr.args[i]->col);
         }
     }
     expr.arraySize = static_cast<int>(expr.args.size());
-    return elem == Type::Bool ? Type::ArrayBool : Type::ArrayInt;
+    return Type::arrayOf(elem);
 }
 
 Type Sema::checkIndex(Expr& expr) {
@@ -609,16 +614,16 @@ Type Sema::checkIndex(Expr& expr) {
 
     if (!isArrayType(base)) {
         fail(std::string("cannot index into a value of type '") +
-                 typeName(base) + "'",
+                 tyName(base) + "'",
              expr.line, expr.col);
     }
     if (idx != Type::Int) {
-        fail(std::string("array index must be int, got '") + typeName(idx) + "'",
+        fail(std::string("array index must be int, got '") + tyName(idx) + "'",
              expr.rhs->line, expr.rhs->col);
     }
     expr.slot = expr.lhs->slot;
     expr.arraySize = expr.lhs->arraySize;
-    return arrayElemType(base);
+    return base.element();
 }
 
 Type Sema::checkUnary(Expr& expr) {
@@ -627,14 +632,14 @@ Type Sema::checkUnary(Expr& expr) {
         case TokenType::Bang:
             if (operand != Type::Bool) {
                 fail(std::string("'!' expects bool, got '") +
-                         typeName(operand) + "'",
+                         tyName(operand) + "'",
                      expr.line, expr.col);
             }
             return Type::Bool;
         case TokenType::Minus:
             if (operand != Type::Int && operand != Type::Float) {
                 fail(std::string("unary '-' expects int or float, got '") +
-                         typeName(operand) + "'",
+                         tyName(operand) + "'",
                      expr.line, expr.col);
             }
             return operand;
@@ -650,21 +655,21 @@ Type Sema::checkBinary(Expr& expr) {
     auto bothInt = [&]() {
         if (left != Type::Int || right != Type::Int) {
             fail(std::string("operator expects int operands, got '") +
-                     typeName(left) + "' and '" + typeName(right) + "'",
+                     tyName(left) + "' and '" + tyName(right) + "'",
                  expr.line, expr.col);
         }
     };
     auto bothBool = [&]() {
         if (left != Type::Bool || right != Type::Bool) {
             fail(std::string("operator expects bool operands, got '") +
-                     typeName(left) + "' and '" + typeName(right) + "'",
+                     tyName(left) + "' and '" + tyName(right) + "'",
                  expr.line, expr.col);
         }
     };
     auto bothFloat = [&]() {
         if (left != Type::Float || right != Type::Float) {
             fail(std::string("operator expects two floats, got '") +
-                     typeName(left) + "' and '" + typeName(right) + "'",
+                     tyName(left) + "' and '" + tyName(right) + "'",
                  expr.line, expr.col);
         }
     };
@@ -701,8 +706,8 @@ Type Sema::checkBinary(Expr& expr) {
         case TokenType::NotEq:
             if (left == Type::Float || right == Type::Float) {
                 if (left != right) {
-                    fail(std::string("cannot compare '") + typeName(left) +
-                             "' with '" + typeName(right) + "' with == / !=",
+                    fail(std::string("cannot compare '") + tyName(left) +
+                             "' with '" + tyName(right) + "' with == / !=",
                          expr.line, expr.col);
                 }
                 return Type::Bool;
@@ -710,7 +715,7 @@ Type Sema::checkBinary(Expr& expr) {
             if (left == Type::Str) {
                 if (right != Type::Str) {
                     fail(std::string("cannot compare 'string' with '") +
-                             typeName(right) + "' with == / !=",
+                             tyName(right) + "' with == / !=",
                          expr.line, expr.col);
                 }
                 return Type::Bool;
@@ -719,8 +724,8 @@ Type Sema::checkBinary(Expr& expr) {
                 fail("cannot compare arrays with == / !=", expr.line, expr.col);
             }
             if (left != right || left == Type::Void || left == Type::Error) {
-                fail(std::string("cannot compare '") + typeName(left) +
-                         "' with '" + typeName(right) + "'",
+                fail(std::string("cannot compare '") + tyName(left) +
+                         "' with '" + tyName(right) + "'",
                      expr.line, expr.col);
             }
             return Type::Bool;
@@ -748,7 +753,7 @@ Type Sema::checkCall(Expr& expr) {
         Type argType = checkExpr(*expr.args[0]);
         if (!isArrayType(argType) && argType != Type::Str) {
             fail(std::string("'len' expects an array or string argument, got '") +
-                     typeName(argType) + "'",
+                     tyName(argType) + "'",
                  expr.args[0]->line, expr.args[0]->col);
         }
         // 0 ≥ 0 → size known at compile time; -1 → runtime length (slice);
@@ -769,14 +774,14 @@ Type Sema::checkCall(Expr& expr) {
         if (expr.name == "float") {
             if (argType != Type::Int) {
                 fail(std::string("'float' expects an int argument, got '") +
-                         typeName(argType) + "'",
+                         tyName(argType) + "'",
                      expr.args[0]->line, expr.args[0]->col);
             }
             return Type::Float;
         }
         if (argType != Type::Float) {
             fail(std::string("'int' expects a float argument, got '") +
-                     typeName(argType) + "'",
+                     tyName(argType) + "'",
                  expr.args[0]->line, expr.args[0]->col);
         }
         return Type::Int;
@@ -808,8 +813,8 @@ Type Sema::checkCall(Expr& expr) {
                 if (argType != info.paramTypes[a]) {
                     fail("argument " + std::to_string(a + 1) + " of '" +
                              expr.name + "': expected '" +
-                             typeName(info.paramTypes[a]) + "', got '" +
-                             typeName(argType) + "'",
+                             tyName(info.paramTypes[a]) + "', got '" +
+                             tyName(argType) + "'",
                          expr.args[a]->line, expr.args[a]->col);
                 }
             }

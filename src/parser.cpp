@@ -67,8 +67,7 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
                  "(the length is not part of the type)");
         }
         expect(TokenType::RBracket, "']' after '['");
-        if (base == Type::Bool) return Type::ArrayBool;
-        return Type::ArrayInt;
+        return Type::arrayOf(base);
     }
     return base;
 }
@@ -162,10 +161,10 @@ StmtPtr Parser::parseVarDecl() {
             }
             expect(TokenType::RBracket, "']' after array size");
             if (ty == Type::Int) {
-                ty = Type::ArrayInt;
+                ty = Type::arrayOf(Type::Int);
                 size = static_cast<int>(n);
             } else if (ty == Type::Bool) {
-                ty = Type::ArrayBool;
+                ty = Type::arrayOf(Type::Bool);
                 size = static_cast<int>(n);
             } else {
                 fail("array element type must be int or bool");

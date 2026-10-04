@@ -6,37 +6,100 @@
 
 #include "token.hpp"
 
-enum class Type {
-    Int,
-    Bool,
-    Float,      // 64-bit IEEE 754 binary64
-    Void,
-    Str,        // string value (immutable text in .rodata)
-    ArrayInt,   // int[N]
-    ArrayBool,  // bool[N]
-    Error,      // error-recovery sentinel; never reported to the user
+// A type is a small value type: three words, copied and compared by value.
+// Scalars carry only `kind`. An array also carries the kind (and struct id)
+// of its element — arrays never nest, so nothing here is recursive. A struct
+// carries its index in Program::structs.
+struct Type {
+    enum class Kind {
+        Int,
+        Bool,
+        Float,   // 64-bit IEEE 754 binary64
+        Void,
+        Str,     // string value (immutable text in .rodata)
+        Error,   // error-recovery sentinel; never reported to the user
+        Array,   // int[N] / bool[N] / Point[] — the length lives on the declaration
+        Struct,  // heap-allocated record
+    };
+
+    Kind kind = Kind::Error;
+    Kind elemKind = Kind::Error;  // Array: kind of the element type
+    int id = -1;                  // Struct / Array-of-Struct: Program::structs index
+
+    static const Type Int;
+    static const Type Bool;
+    static const Type Float;
+    static const Type Void;
+    static const Type Str;
+    static const Type Error;
+
+    static Type arrayOf(const Type& elem) {
+        return Type{Kind::Array, elem.kind,
+                    elem.kind == Kind::Struct ? elem.id : -1};
+    }
+
+    static Type structOf(int structId) {
+        return Type{Kind::Struct, Kind::Error, structId};
+    }
+
+    // Element type of an array type; Kind::Error for anything else.
+    Type element() const {
+        if (kind != Kind::Array) return Error;
+        if (elemKind == Kind::Struct) return structOf(id);
+        return Type{elemKind, Kind::Error, -1};
+    }
+
+    friend bool operator==(const Type& a, const Type& b) {
+        return a.kind == b.kind && a.elemKind == b.elemKind && a.id == b.id;
+    }
+    friend bool operator!=(const Type& a, const Type& b) { return !(a == b); }
 };
 
-inline const char* typeName(Type t) {
-    switch (t) {
-        case Type::Int: return "int";
-        case Type::Bool: return "bool";
-        case Type::Float: return "float";
-        case Type::Void: return "void";
-        case Type::Str: return "string";
-        case Type::ArrayInt: return "int[]";
-        case Type::ArrayBool: return "bool[]";
-        case Type::Error: return "<error>";
+inline const Type Type::Int{Type::Kind::Int};
+inline const Type Type::Bool{Type::Kind::Bool};
+inline const Type Type::Float{Type::Kind::Float};
+inline const Type Type::Void{Type::Kind::Void};
+inline const Type Type::Str{Type::Kind::Str};
+inline const Type Type::Error{Type::Kind::Error};
+
+struct StructField {
+    std::string name;
+    Type type = Type::Error;
+    int line = 0;
+    int col = 0;
+};
+
+struct StructDecl {
+    std::string name;
+    std::vector<StructField> fields;
+    int line = 0;
+    int col = 0;
+    int sizeBytes = 0;  // filled by sema: fields * 8 (all fields are one word)
+};
+
+// `structs` is passed in so a struct type can print as its declared name.
+inline std::string typeName(const Type& t,
+                            const std::vector<StructDecl>& structs) {
+    switch (t.kind) {
+        case Type::Kind::Int: return "int";
+        case Type::Kind::Bool: return "bool";
+        case Type::Kind::Float: return "float";
+        case Type::Kind::Void: return "void";
+        case Type::Kind::Str: return "string";
+        case Type::Kind::Error: return "<error>";
+        case Type::Kind::Array:
+            return typeName(t.element(), structs) + "[]";
+        case Type::Kind::Struct:
+            if (t.id >= 0 && t.id < static_cast<int>(structs.size())) {
+                return structs[t.id].name;
+            }
+            return "<struct>";
     }
     return "?";
 }
 
-inline bool isArrayType(Type t) {
-    return t == Type::ArrayInt || t == Type::ArrayBool;
-}
-
-inline Type arrayElemType(Type t) {
-    return t == Type::ArrayBool ? Type::Bool : Type::Int;
+inline bool isArrayType(const Type& t) {
+    return t.kind == Type::Kind::Array;
 }
 
 struct Expr;
@@ -363,5 +426,6 @@ struct FnDecl {
 };
 
 struct Program {
+    std::vector<StructDecl> structs;
     std::vector<FnDecl> functions;
 };
