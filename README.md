@@ -7,6 +7,9 @@
 - Emits **x86-64 GAS assembly**, assembled with `as`, linked with the system linker (`ld` via `gcc` driver).
 - Static typing: `int` (64-bit), `bool`, `void` (return type only).
 
+**Website & docs:** https://tomassgg494.github.io/Amethyst-site/
+(source: [`tomassgg494/Amethyst-site`](https://github.com/tomassgg494/Amethyst-site))
+
 ## Build
 
 ```sh
