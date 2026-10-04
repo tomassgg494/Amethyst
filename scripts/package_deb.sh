@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 PKG_NAME="amethyst"
-PKG_VERSION="${AMETHYST_VERSION:-1.1.0}"
+PKG_VERSION="${AMETHYST_VERSION:-1.2.0}"
 PKG_ARCH="amd64"
 PKG_MAINTAINER="Amethyst Project <amethyst@localhost>"
 PKG_SECTION="devel"

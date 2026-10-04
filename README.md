@@ -28,9 +28,9 @@ Beginners do **not** need to compile the compiler. The Dev Kit ships a ready bin
 
 ```sh
 make deb
-# → dist/amethyst-devkit_1.1.0_amd64.deb
+# → dist/amethyst-devkit_1.2.0_amd64.deb
 
-sudo apt install ./dist/amethyst-devkit_1.1.0_amd64.deb
+sudo apt install ./dist/amethyst-devkit_1.2.0_amd64.deb
 ```
 
 Installed layout:

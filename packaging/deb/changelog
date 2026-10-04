@@ -1,3 +1,30 @@
+amethyst (1.2.0) unstable; urgency=medium
+
+  * struct type: declarations `struct P { x: int, y: float }` with
+    comma-separated fields, read and written as `p.x`, and usable before
+    being declared (`struct Node { next: Node }`).
+  * Objects live on the heap: `var p = new P { x: 1, y: 2 };` takes every
+    field exactly once in any order, `var p: P = null;` holds no object
+    yet, and reading a field of null stops the program with a runtime
+    error. Structs are comparable only against null.
+  * `free(p);` releases an object or a `new` array and nulls the
+    variable, so a second free is a no-op. One free per object: there is
+    still no garbage collector, and aliases of a freed object dangle.
+  * Arrays of every element type: int, bool, float, string and structs,
+    in fixed `T[N]` form, as slices `T[]` and in array literals.
+  * Dynamic arrays: `var a: int[] = new int[n];` — n is any int
+    expression read once, the block starts zeroed, the length lives with
+    the pointer and drives the bounds check, and `free(a)` resets it to 0.
+  * New keywords: struct, new, free, null. `new T[n]` may only initialize
+    a `T[]` variable; a fixed-size array or an array parameter cannot be
+    freed.
+  * Runtime errors added: null reference, out of memory and array size
+    must be positive.
+  * New examples: structs.amt, heap.amt; documentation website updated
+    for structs and heap arrays.
+
+ -- Amethyst Project <amethyst@localhost>  Sun, 04 Oct 2026 17:00:00 +0000
+
 amethyst (1.1.0) unstable; urgency=medium
 
   * Compound assignment (+= -= *= /= %=), len() builtin and a

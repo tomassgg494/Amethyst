@@ -15,16 +15,16 @@ fn main() -> int {
     print(n);
 
     // strings are ordinary values: store, assign, compare, pass, return
-    var label = "v1.1";
-    var same: string = "v1.1";
+    var label = "v1.2";
+    var same: string = "v1.2";
     print(label);
     print(label == same);
-    print(label == "v1.2");
+    print(label == "v1.3");
     print(len(label));
     print(tag("amethyst"));
     print(tag("other"));
 
-    label = "v1.2";
+    label = "v1.3";
     print(label);
 
     if n > 0 {
