@@ -27,6 +27,7 @@ const std::unordered_map<std::string, TokenType>& keywords() {
         {"for", TokenType::KwFor},
         {"in", TokenType::KwIn},
         {"struct", TokenType::KwStruct},
+        {"impl", TokenType::KwImpl},
         {"new", TokenType::KwNew},
         {"free", TokenType::KwFree},
         {"null", TokenType::KwNull},

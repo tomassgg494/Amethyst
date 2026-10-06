@@ -248,6 +248,22 @@ beta
 7" "$out"
 check "dynarray exit" "0" "$rc"
 
+# methods: impl blocks, self and value.method(...)
+$BIN -o build/methods examples/methods.amt
+set +e
+out=$(./build/methods)
+rc=$?
+set -e
+check "methods output" "1
+5
+7
+17
+62
+62
+11
+3" "$out"
+check "methods exit" "0" "$rc"
+
 # definite assignment: nested branches, shadowing, early return
 $BIN -o build/definite examples/definite.amt
 set +e
@@ -738,6 +754,16 @@ expect_fail "push of the wrong type" tests/err_push_type.amt "cannot push 'strin
 expect_fail "push arity" tests/err_push_arity.amt "'push' expects 2 argument(s), got 1"
 expect_fail "pop of a scalar" tests/err_pop_scalar.amt "'pop' expects an array as its first argument"
 expect_fail "empty literal type inference" tests/err_empty_infer.amt "cannot infer the element type of an empty array literal"
+expect_fail "method without self" tests/err_impl_self.amt "must take 'self: Point' as its first parameter"
+expect_fail "method self type" tests/err_impl_self_type.amt "must take 'self: Point' as its first parameter"
+expect_fail "duplicate method" tests/err_impl_dup_method.amt "duplicate method 'move' in impl 'Point'"
+expect_fail "unknown method" tests/err_no_method.amt "type 'Point' has no method 'nope'"
+expect_fail "method arity" tests/err_method_arity.amt "method 'Point.move' expects 1 argument(s), got 0"
+expect_fail "method argument type" tests/err_method_arg_type.amt "argument 1 of 'Point.move': expected 'int', got 'string'"
+expect_fail "assign to self" tests/err_self_assign.amt "cannot assign to 'self'"
+expect_fail "reserved function name" tests/err_reserved_fn.amt "starting with '__amethyst_' are reserved"
+expect_fail "method on a non-struct" tests/err_receiver_not_struct.amt "is a method call but the receiver is not a struct"
+expect_fail "impl of an unknown struct" tests/err_impl_unknown.amt "impl for unknown struct 'Ghost'"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

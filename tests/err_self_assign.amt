@@ -1,0 +1,13 @@
+struct Point {
+    x: int
+}
+
+impl Point {
+    fn reset(self: Point) -> void {
+        self = new Point { x: 0 };
+    }
+}
+
+fn main() -> int {
+    return 0;
+}

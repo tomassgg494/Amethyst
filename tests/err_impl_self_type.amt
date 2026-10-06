@@ -1,0 +1,16 @@
+struct Point {
+    x: int
+}
+
+struct Other {
+    y: int
+}
+
+impl Point {
+    fn move(self: Other) -> void {
+    }
+}
+
+fn main() -> int {
+    return 0;
+}

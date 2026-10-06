@@ -276,6 +276,11 @@ std::string Codegen::emit(const Program& program) {
     for (const auto& fn : program.functions) {
         emitFunction(fn, program);
     }
+    for (const auto& impl : program.impls) {
+        for (const auto& m : impl.methods) {
+            emitFunction(m, program);
+        }
+    }
 
     if (!strings_.empty() || !floats_.empty()) {
         out_ += ".section .rodata\n";
@@ -307,10 +312,14 @@ void Codegen::emitFunction(const FnDecl& fn, const Program& program) {
     stackDepth_ = 0;
     loopStack_.clear();
     currentReturn_ = fn.returnType;
+    // a method is emitted under its mangled symbol; sema mangles calls the
+    // same way, so the assembler sees matching names on both sides
+    const std::string symbol =
+        fn.structName.empty() ? fn.name : mangleMethod(fn.structName, fn.name);
 
-    out_ += ".globl " + fn.name + "\n";
-    out_ += ".type " + fn.name + ", @function\n";
-    out_ += fn.name + ":\n";
+    out_ += ".globl " + symbol + "\n";
+    out_ += ".type " + symbol + ", @function\n";
+    out_ += symbol + ":\n";
     out_ += "    pushq %rbp\n";
     out_ += "    movq %rsp, %rbp\n";
 
@@ -372,7 +381,7 @@ void Codegen::emitFunction(const FnDecl& fn, const Program& program) {
     }
     out_ += "    leave\n";
     out_ += "    ret\n";
-    out_ += ".size " + fn.name + ", .-" + fn.name + "\n";
+    out_ += ".size " + symbol + ", .-" + symbol + "\n";
 }
 
 void Codegen::emitBoundsCheck(const Expr& idx) {

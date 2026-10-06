@@ -1,0 +1,7 @@
+fn __amethyst_helper() -> int {
+    return 1;
+}
+
+fn main() -> int {
+    return __amethyst_helper();
+}

@@ -1,0 +1,15 @@
+struct Point {
+    x: int
+}
+
+impl Point {
+    fn move(self: Point, dx: int) -> void {
+        self.x = self.x + dx;
+    }
+}
+
+fn main() -> int {
+    var n = 1;
+    n.move(2);
+    return 0;
+}

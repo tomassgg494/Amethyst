@@ -142,6 +142,11 @@ void Sema::collectFunctions(Program& program) {
             fail("'" + fn.name + "' is a builtin and cannot be redefined",
                  fn.line, fn.col);
         }
+        if (fn.name.rfind("__amethyst_", 0) == 0) {
+            fail("function names starting with '__amethyst_' are reserved "
+                 "for the compiler",
+                 fn.line, fn.col);
+        }
         for (const auto& existing : fnNames_) {
             if (existing == fn.name) {
                 fail("redefinition of function '" + fn.name + "'", fn.line, fn.col);
@@ -151,6 +156,45 @@ void Sema::collectFunctions(Program& program) {
         for (const auto& p : fn.params) paramTypes.push_back(p.type);
         fnInfos_.push_back(FnInfo{fn.returnType, paramTypes, static_cast<int>(i)});
         fnNames_.push_back(fn.name);
+    }
+}
+
+// Every `impl X { ... }` block: the struct must exist, each method must
+// take `self: X` as its first parameter, and no method may be defined
+// twice for the same struct. Collected up front, so a method may be called
+// from anywhere in the file, regardless of where the impl block sits.
+void Sema::collectImpls(Program& program) {
+    methods_.assign(program.structs.size(), {});
+    for (ImplDecl& impl : program.impls) {
+        int sid = -1;
+        for (size_t s = 0; s < program.structs.size(); ++s) {
+            if (program.structs[s].name == impl.structName) {
+                sid = static_cast<int>(s);
+            }
+        }
+        if (sid < 0) {
+            fail("impl for unknown struct '" + impl.structName + "'",
+                 impl.line, impl.col);
+        }
+        for (FnDecl& m : impl.methods) {
+            const std::string what = "method '" + impl.structName + "." +
+                                     m.name + "' must take 'self: " +
+                                     impl.structName + "' as its first parameter";
+            if (m.params.empty()) fail(what, m.line, m.col);
+            const Param& self = m.params[0];
+            if (self.name != "self" || self.type.kind != Type::Kind::Struct ||
+                self.type.id != sid) {
+                fail(what, self.line, self.col);
+            }
+            for (const MethodInfo& other : methods_[sid]) {
+                if (other.fn->name == m.name) {
+                    fail("duplicate method '" + m.name + "' in impl '" +
+                             impl.structName + "'",
+                         m.line, m.col);
+                }
+            }
+            methods_[sid].push_back(MethodInfo{&m, impl.structName});
+        }
     }
 }
 
@@ -176,9 +220,15 @@ void Sema::analyze(Program& program) {
         s.sizeBytes = static_cast<int>(s.fields.size()) * 8;
     }
     collectFunctions(program);
+    collectImpls(program);
     checkMain(program);
     for (auto& fn : program.functions) {
         checkFunction(fn);
+    }
+    for (ImplDecl& impl : program.impls) {
+        for (FnDecl& m : impl.methods) {
+            checkFunction(m);
+        }
     }
 }
 
@@ -196,6 +246,11 @@ void Sema::checkFunction(FnDecl& fn) {
         pi.isParam = true;
         pi.assigned = true;
         declare(p.name, pi, p.line, p.col);
+    }
+    if (!fn.structName.empty()) {
+        // `self` cannot be reassigned: the receiver never changes
+        VarInfo* self = lookup(fn.params[0].name);
+        if (self != nullptr) self->isSelf = true;
     }
 
     if (fn.body == nullptr || fn.body->kind != StmtKind::Block) {
@@ -433,6 +488,11 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                          stmt.line, stmt.col);
                 }
                 var->used = true;
+                if (var->isSelf) {
+                    fail("cannot assign to 'self' (a method keeps the "
+                         "receiver it was called on)",
+                         stmt.line, stmt.col);
+                }
                 if (isArrayType(var->type)) {
                     fail("cannot assign to whole array '" + stmt.target->name +
                              "' (assign elements: " + stmt.target->name +
@@ -1185,6 +1245,61 @@ Type Sema::checkCall(Expr& expr) {
                  expr.line, expr.col);
         }
         return a;
+    }
+
+    // p.m(...): resolve the method on the type of the receiver, then pass
+    // the receiver as the first argument (`self`) under the mangled symbol
+    if (expr.object) {
+        Type objType = checkExpr(*expr.object);
+        if (objType.kind != Type::Kind::Struct) {
+            fail("'" + expr.name +
+                     "' is a method call but the receiver is not a struct, "
+                     "got '" + tyName(objType) + "'",
+                 expr.object->line, expr.object->col);
+        }
+        const std::string typeName = program_->structs[objType.id].name;
+        const FnDecl* method = nullptr;
+        for (const MethodInfo& mi : methods_[objType.id]) {
+            if (mi.fn->name == expr.name) method = mi.fn;
+        }
+        if (method == nullptr) {
+            fail("type '" + typeName + "' has no method '" + expr.name + "'",
+                 expr.line, expr.col);
+        }
+        const std::string what = typeName + "." + expr.name;
+        // `self` is passed by the caller, so it is not written here
+        const size_t want = method->params.size() - 1;
+        if (expr.args.size() != want) {
+            fail("method '" + what + "' expects " + std::to_string(want) +
+                     " argument(s), got " + std::to_string(expr.args.size()),
+                 expr.line, expr.col);
+        }
+        for (size_t a = 0; a < expr.args.size(); ++a) {
+            const Param& param = method->params[a + 1];
+            Type argType = checkExpr(*expr.args[a]);
+            if (isArrayType(param.type)) {
+                // slices are passed as a variable, exactly like for functions
+                if (isArrayType(argType) && expr.args[a]->kind != ExprKind::Ident) {
+                    fail("array argument " + std::to_string(a + 1) + " of '" +
+                             what + "' must be a variable (assign the array "
+                             "first)",
+                         expr.args[a]->line, expr.args[a]->col);
+                }
+            } else {
+                requireUsable(*expr.args[a], argType, "argument");
+            }
+            if (argType != param.type && !acceptsNull(param.type, argType)) {
+                fail("argument " + std::to_string(a + 1) + " of '" + what +
+                         "': expected '" + tyName(param.type) + "', got '" +
+                         tyName(argType) + "'",
+                     expr.args[a]->line, expr.args[a]->col);
+            }
+        }
+        // the receiver becomes the first argument, exactly like `self`
+        expr.args.insert(expr.args.begin(), std::move(expr.object));
+        expr.object = nullptr;
+        expr.name = mangleMethod(typeName, method->name);
+        return method->returnType;
     }
 
     for (size_t i = 0; i < fnNames_.size(); ++i) {

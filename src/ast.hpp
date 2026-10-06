@@ -158,10 +158,13 @@ struct Expr {
     // New: struct → args (values) with fieldNames parallel to them, in
     //      declaration order after sema; array → lhs is the element count
     //      and type.kind == Kind::Array tells the two apart
+    // Call: object is the receiver of a method call (p.m(...)); sema moves
+    //       it into args[0] as `self` and clears it
     ExprPtr lhs;
     ExprPtr rhs;
     std::vector<ExprPtr> args;
     std::vector<std::string> fieldNames;  // New only
+    ExprPtr object;                      // Call only: method receiver
 
     // Sema results.
     int slot = -1;         // Ident / Index base: frame slot
@@ -462,6 +465,7 @@ struct Param {
 
 struct FnDecl {
     std::string name;
+    std::string structName;  // non-empty → method of that struct (impl block)
     Type returnType = Type::Void;
     std::vector<Param> params;
     std::unique_ptr<Stmt> body;  // StmtKind::Block
@@ -470,7 +474,22 @@ struct FnDecl {
     int slotCount = 0;  // filled by sema: total frame slots (params + locals)
 };
 
+struct ImplDecl {
+    std::string structName;
+    std::vector<FnDecl> methods;
+    int line = 0;
+    int col = 0;
+};
+
+// Assembler symbol of a method. The prefix is reserved for the compiler:
+// a user function may not start with it, so it cannot be redefined.
+inline std::string mangleMethod(const std::string& typeName,
+                                const std::string& method) {
+    return "__amethyst_m_" + typeName + "_" + method;
+}
+
 struct Program {
     std::vector<StructDecl> structs;
     std::vector<FnDecl> functions;
+    std::vector<ImplDecl> impls;
 };

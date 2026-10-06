@@ -1,0 +1,6 @@
+impl Ghost {
+}
+
+fn main() -> int {
+    return 0;
+}

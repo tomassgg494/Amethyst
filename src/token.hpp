@@ -26,6 +26,7 @@ enum class TokenType {
     KwFor,
     KwIn,
     KwStruct,
+    KwImpl,
     KwNew,
     KwFree,
     KwNull,

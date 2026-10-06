@@ -1,0 +1,67 @@
+// methods: an impl block gives a struct its own functions
+// every method takes `self` first and is written as value.method(...)
+
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Counter {
+    n: int
+}
+
+impl Point {
+    fn move(self: Point, dx: int, dy: int) -> void {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
+    }
+
+    fn jump(self: Point) -> void {      // a method may call others on self
+        self.move(10, 10);
+    }
+
+    fn add(self: Point, other: Point) -> int {
+        return self.x + other.x + self.y + other.y;
+    }
+}
+
+impl Counter {
+    fn tick(self: Counter) -> void {
+        self.n = self.n + 1;
+    }
+
+    fn value(self: Counter) -> int {
+        return self.n;
+    }
+}
+
+fn main() -> int {
+    var p = new Point { x: 1, y: 2 };
+    print(p.x);          // 1
+    p.move(4, 5);
+    print(p.x);          // 5
+    print(p.y);          // 7
+    p.jump();
+    print(p.y);          // 17
+
+    var q = new Point { x: 10, y: 20 };
+    print(p.add(q));     // 15 + 10 + 17 + 20 = 62
+    print(q.add(p));     // 10 + 15 + 20 + 17 = 62
+
+    // variables alias the object, so methods reach the same state
+    var r = q;
+    r.move(1, 1);
+    print(q.x);          // 11
+    free(p);
+    free(q);
+
+    var c = new Counter { n: 0 };
+    var i = 0;
+    while i < 3 {
+        c.tick();
+        i = i + 1;
+    }
+    print(c.value());    // 3
+    free(c);
+    return 0;
+}

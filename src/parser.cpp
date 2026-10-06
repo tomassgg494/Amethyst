@@ -166,6 +166,33 @@ FnDecl Parser::parseFunction() {
     return fn;
 }
 
+ImplDecl Parser::parseImpl() {
+    const Token& kw = previous();  // 'impl'
+    const Token& nameTok = expect(TokenType::Ident, "struct name after 'impl'");
+    expect(TokenType::LBrace, "'{' after the struct name");
+
+    ImplDecl impl;
+    impl.structName = nameTok.text;
+    impl.line = kw.line;
+    impl.col = kw.col;
+    while (!check(TokenType::RBrace) && !check(TokenType::Eof)) {
+        if (!check(TokenType::KwFn)) {
+            fail("expected a method declaration ('fn') inside 'impl'");
+        }
+        FnDecl fn = parseFunction();
+        for (const auto& existing : impl.methods) {
+            if (existing.name == fn.name) {
+                fail("duplicate method '" + fn.name + "' in impl '" +
+                     impl.structName + "'");
+            }
+        }
+        fn.structName = impl.structName;
+        impl.methods.push_back(std::move(fn));
+    }
+    expect(TokenType::RBrace, "'}' to close impl");
+    return impl;
+}
+
 Program Parser::parseProgram() {
     Program prog;
     prog_ = &prog;
@@ -173,10 +200,12 @@ Program Parser::parseProgram() {
     while (!check(TokenType::Eof)) {
         if (match(TokenType::KwStruct)) {
             parseStruct();
+        } else if (match(TokenType::KwImpl)) {
+            prog.impls.push_back(parseImpl());
         } else if (check(TokenType::KwFn)) {
             prog.functions.push_back(parseFunction());
         } else {
-            fail("expected function or struct declaration ('fn' or 'struct')");
+            fail("expected a declaration ('fn', 'struct' or 'impl')");
         }
     }
     prog_ = nullptr;
@@ -451,8 +480,26 @@ ExprPtr Parser::parsePostfix() {
         if (check(TokenType::Dot)) {
             advance();  // '.'
             const Token& fieldTok = expect(TokenType::Ident, "field name after '.'");
-            expr = Expr::makeField(std::move(expr), fieldTok.text, fieldTok.line,
-                                   fieldTok.col);
+            ExprPtr field = Expr::makeField(std::move(expr), fieldTok.text,
+                                            fieldTok.line, fieldTok.col);
+            // method call: p.move(1, 2) — everything up to the last dot is
+            // the receiver; sema resolves the method on its type
+            if (check(TokenType::LParen)) {
+                advance();  // '('
+                std::vector<ExprPtr> args;
+                if (!check(TokenType::RParen)) {
+                    do {
+                        args.push_back(parseExpression());
+                    } while (match(TokenType::Comma));
+                }
+                expect(TokenType::RParen, "')' after arguments");
+                auto call = Expr::makeCall(fieldTok.text, std::move(args),
+                                           fieldTok.line, fieldTok.col);
+                call->object = std::move(field->lhs);  // receiver, not p.m
+                expr = std::move(call);
+            } else {
+                expr = std::move(field);
+            }
             continue;
         }
         break;

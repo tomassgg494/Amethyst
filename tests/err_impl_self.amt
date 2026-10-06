@@ -1,0 +1,12 @@
+struct Point {
+    x: int
+}
+
+impl Point {
+    fn move(dx: int) -> void {
+    }
+}
+
+fn main() -> int {
+    return 0;
+}

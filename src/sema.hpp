@@ -27,6 +27,7 @@ public:
 
 private:
     void collectFunctions(Program& program);
+    void collectImpls(Program& program);
     void checkMain(Program& program);
     void checkFunction(FnDecl& fn);
 
@@ -46,6 +47,13 @@ private:
         bool isParam = false;
         bool assigned = false;  // definitely assigned before any read
         bool heapArray = false;  // created with `new` in this function
+        bool isSelf = false;     // the `self` parameter of a method
+    };
+
+    // One entry per method, grouped by the id of the struct it belongs to.
+    struct MethodInfo {
+        const FnDecl* fn;
+        std::string typeName;  // struct name (messages and the symbol)
     };
 
     struct Scope {
@@ -91,6 +99,7 @@ private:
 
     std::vector<FnInfo> fnInfos_;
     std::vector<std::string> fnNames_;
+    std::vector<std::vector<MethodInfo>> methods_;  // struct id → methods
     std::vector<Scope> scopes_;
     std::vector<SemaWarning> warnings_;
     const Program* program_ = nullptr;  // valid for the current analyze()

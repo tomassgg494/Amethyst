@@ -35,6 +35,7 @@ private:
     void collectStructNames(const std::vector<Token>& tokens);
     void parseStruct();
     FnDecl parseFunction();
+    ImplDecl parseImpl();
     std::vector<Param> parseParams();
 
     StmtPtr parseStatement();
