@@ -1,0 +1,6 @@
+fn main() -> int {
+    var s = "x";
+    s += 1;
+    print(s);
+    return 0;
+}

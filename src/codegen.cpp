@@ -116,6 +116,46 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    call exit@PLT\n";
     out_ += ".size __amethyst_size_fail, .-__amethyst_size_fail\n";
 
+    // string concatenation: "a" + "b" (and `s += "b"`)
+    // entry: %rdi = left, %rsi = right → %rax = freshly allocated copy
+    // the result lives until the program exits: there is no collector yet
+    out_ += ".globl __amethyst_str_concat\n";
+    out_ += ".type __amethyst_str_concat, @function\n";
+    out_ += "__amethyst_str_concat:\n";
+    out_ += "    pushq %rbp\n";              // entry rsp ≡ 8 → now ≡ 0
+    out_ += "    movq %rsp, %rbp\n";
+    out_ += "    subq $32, %rsp\n";          // stays 16-aligned for the calls
+    out_ += "    movq %rdi, -8(%rbp)\n";     // left
+    out_ += "    movq %rsi, -16(%rbp)\n";    // right
+    out_ += "    call strlen@PLT\n";         // rdi = left
+    out_ += "    movq %rax, -24(%rbp)\n";    // left length
+    out_ += "    movq -16(%rbp), %rdi\n";
+    out_ += "    call strlen@PLT\n";
+    out_ += "    movq %rax, -32(%rbp)\n";    // right length
+    out_ += "    movq -24(%rbp), %rdi\n";
+    out_ += "    addq %rax, %rdi\n";
+    out_ += "    addq $1, %rdi\n";           // + NUL
+    out_ += "    call malloc@PLT\n";
+    out_ += "    testq %rax, %rax\n";
+    out_ += "    je __amethyst_str_concat_oom\n";
+    out_ += "    movq %rax, %rdi\n";         // dest = p
+    out_ += "    movq -8(%rbp), %rsi\n";     // left
+    out_ += "    movq -24(%rbp), %rdx\n";    // left length
+    out_ += "    call memcpy@PLT\n";         // memcpy returns its dest
+    out_ += "    movq %rax, %rdi\n";         // dest = p + left length
+    out_ += "    addq -24(%rbp), %rdi\n";
+    out_ += "    movq -16(%rbp), %rsi\n";    // right
+    out_ += "    movq -32(%rbp), %rdx\n";    // right length
+    out_ += "    addq $1, %rdx\n";           // copy the NUL too
+    out_ += "    call memcpy@PLT\n";
+    out_ += "    subq -24(%rbp), %rax\n";    // back to p
+    out_ += "    leave\n";
+    out_ += "    ret\n";
+    out_ += "__amethyst_str_concat_oom:\n";
+    out_ += "    call __amethyst_oom_fail@PLT\n";  // never returns
+    out_ += "    ud2\n";
+    out_ += ".size __amethyst_str_concat, .-__amethyst_str_concat\n";
+
     for (const auto& fn : program.functions) {
         emitFunction(fn, program);
     }
@@ -483,7 +523,12 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
                 stackDepth_++;
                 out_ += "    movq (%rcx), %rax\n";   // old value
                 out_ += "    movq 8(%rsp), %rcx\n";  // saved rhs
-                if (stmt.declaredType == Type::Float) {
+                if (stmt.declaredType == Type::Str) {
+                    // `s += "x"`: rax = old, rcx = rhs → new string
+                    out_ += "    movq %rax, %rdi\n";
+                    out_ += "    movq %rcx, %rsi\n";
+                    emitAlignedCall("__amethyst_str_concat");
+                } else if (stmt.declaredType == Type::Float) {
                     emitFloatOp(stmt.compoundOp);
                 } else {
                     emitIntOp(stmt.compoundOp);
@@ -804,6 +849,15 @@ void Codegen::emitExpr(const Expr& expr) {
             out_ += "    movq %rax, %rcx\n";
             out_ += "    popq %rax\n";
             stackDepth_--;
+
+            // "a" + "b" builds a new heap string (leaked until a GC exists)
+            if (expr.lhs->type == Type::Str && expr.rhs->type == Type::Str &&
+                op == TokenType::Plus) {
+                out_ += "    movq %rax, %rdi\n";  // lhs → rdi
+                out_ += "    movq %rcx, %rsi\n";  // rhs → rsi
+                emitAlignedCall("__amethyst_str_concat");
+                break;
+            }
 
             // strings compare by content, not by pointer
             if (expr.lhs->type == Type::Str &&

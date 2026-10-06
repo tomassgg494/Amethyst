@@ -442,7 +442,23 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 bool bothInt = targetType == Type::Int && valueType == Type::Int;
                 bool bothFloat =
                     targetType == Type::Float && valueType == Type::Float;
-                if (!bothInt && !bothFloat) {
+                // only `+=` accepts strings, and only on both sides
+                bool bothStr = stmt.compoundOp == TokenType::PlusEq &&
+                               targetType == Type::Str &&
+                               valueType == Type::Str;
+                if (targetType == Type::Str && !bothStr) {
+                    if (stmt.compoundOp != TokenType::PlusEq) {
+                        fail(std::string("'") + compoundOpText(stmt.compoundOp) +
+                                 "' cannot be applied to strings",
+                             stmt.line, stmt.col);
+                    }
+                    fail(std::string("'") + compoundOpText(stmt.compoundOp) +
+                             "' expects a string on both sides (got '" +
+                             tyName(targetType) + "' and '" +
+                             tyName(valueType) + "')",
+                         stmt.line, stmt.col);
+                }
+                if (!bothInt && !bothFloat && !bothStr) {
                     if (targetType == Type::Float || valueType == Type::Float) {
                         fail(std::string("'") +
                                  compoundOpText(stmt.compoundOp) +
@@ -905,6 +921,18 @@ Type Sema::checkBinary(Expr& expr) {
 
     switch (expr.op) {
         case TokenType::Plus:
+            // "a" + "b" concatenates; anything else mixed with a string is
+            // an error (there is no automatic conversion, see int()/float())
+            if (left == Type::Str || right == Type::Str) {
+                if (left != Type::Str || right != Type::Str) {
+                    fail(std::string("'+' expects two strings or two numbers, "
+                                     "got '") +
+                             tyName(left) + "' and '" + tyName(right) + "'",
+                         expr.line, expr.col);
+                }
+                return Type::Str;
+            }
+            [[fallthrough]];
         case TokenType::Minus:
         case TokenType::Star:
         case TokenType::Slash:

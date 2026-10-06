@@ -1,0 +1,25 @@
+// string concatenation with + and +=
+// each operation builds a new string; there is no int -> string
+// conversion yet, so only literals and other strings can be joined
+
+fn greet(name: string) -> string {
+    return "Hello, " + name + "!";
+}
+
+fn main() -> int {
+    var a = "amethyst";
+    print(a + " is fun");       // amethyst is fun
+    print(greet("world"));      // Hello, world!
+
+    var line = "count: ";
+    line += "1";
+    line += "23";
+    print(line);                // count: 123
+
+    print("" + a);              // empty lhs is a no-op
+    print(a + "");              // empty rhs is a no-op
+    print(a + "" + "!");        // and it chains
+
+    print("ab" + "c" == "abc"); // 1 — the result compares by content
+    return 0;
+}

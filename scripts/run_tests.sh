@@ -212,6 +212,21 @@ check "math output" "3
 2" "$out"
 check "math exit" "0" "$rc"
 
+# string concatenation: + and +=
+$BIN -o build/concat examples/concat.amt
+set +e
+out=$(./build/concat)
+rc=$?
+set -e
+check "concat output" "amethyst is fun
+Hello, world!
+count: 123
+amethyst
+amethyst
+amethyst!
+1" "$out"
+check "concat exit" "0" "$rc"
+
 # definite assignment: nested branches, shadowing, early return
 $BIN -o build/definite examples/definite.amt
 set +e
@@ -624,7 +639,7 @@ expect_fail "index non-array" tests/err_index_nonarray.amt "cannot index into a 
 expect_fail "array size mismatch" tests/err_array_size.amt "array size mismatch"
 expect_fail "array elem type" tests/err_array_elem_type.amt "array element 2 has type 'bool'"
 expect_fail "string into int" tests/err_string_var.amt "cannot initialize 'int n' with a string literal"
-expect_fail "string arithmetic" tests/err_string_arith.amt "operator expects int operands, got 'string' and 'int'"
+expect_fail "string arithmetic" tests/err_string_arith.amt "'+' expects two strings or two numbers, got 'string' and 'int'"
 expect_fail "string compared with int" tests/err_string_cmp.amt "cannot compare 'string' with 'int' with == / !="
 expect_fail "array compared" tests/err_array_cmp.amt "cannot compare arrays with == / !="
 expect_fail "compound on bool" tests/err_compound_bool.amt "'+=' expects int on both sides"
@@ -672,6 +687,8 @@ expect_fail "min of mixed types" tests/err_min_mixed.amt "'min' expects two valu
 expect_fail "abs of a string" tests/err_abs_type.amt "'abs' expects an int or float argument"
 expect_fail "builtin redefinition" tests/err_builtin_redef.amt "'min' is a builtin and cannot be redefined"
 expect_fail "sqrt arity" tests/err_sqrt_args.amt "'sqrt' expects 1 argument(s), got 2"
+expect_fail "string += int" tests/err_concats_eq.amt "'+=' expects a string on both sides"
+expect_fail "string -=" tests/err_string_subeq.amt "'-=' cannot be applied to strings"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
