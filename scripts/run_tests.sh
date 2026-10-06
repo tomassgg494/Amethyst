@@ -193,6 +193,25 @@ check "IEEE-754 float edge cases" "inf
 0
 1" "$out"
 
+# math builtins: sqrt, abs, min, max
+$BIN -o build/math examples/math.amt
+set +e
+out=$(./build/math)
+rc=$?
+set -e
+check "math output" "3
+1.4142135623731
+42
+42
+2.5
+3
+7
+1.5
+2.5
+4.24264068711928
+2" "$out"
+check "math exit" "0" "$rc"
+
 # definite assignment: nested branches, shadowing, early return
 $BIN -o build/definite examples/definite.amt
 set +e
@@ -648,6 +667,11 @@ expect_fail "free a local array" tests/err_heap_free_local.amt "only an array va
 expect_fail "free an array parameter" tests/err_heap_free_param.amt "only an array variable initialized with 'new'"
 expect_fail "array size type" tests/err_heap_size_type.amt "array size must be int, got 'string'"
 expect_fail "new as a statement" tests/err_heap_new_stmt.amt "arrays cannot be used in this context"
+expect_fail "sqrt of an int" tests/err_sqrt_int.amt "'sqrt' expects a float argument, got 'int'"
+expect_fail "min of mixed types" tests/err_min_mixed.amt "'min' expects two values of the same type"
+expect_fail "abs of a string" tests/err_abs_type.amt "'abs' expects an int or float argument"
+expect_fail "builtin redefinition" tests/err_builtin_redef.amt "'min' is a builtin and cannot be redefined"
+expect_fail "sqrt arity" tests/err_sqrt_args.amt "'sqrt' expects 1 argument(s), got 2"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

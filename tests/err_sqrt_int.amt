@@ -1,0 +1,4 @@
+fn main() -> int {
+    print(sqrt(4));
+    return 0;
+}

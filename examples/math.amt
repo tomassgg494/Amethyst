@@ -1,0 +1,20 @@
+// math builtins: sqrt, abs, min, max
+
+fn main() -> int {
+    print(sqrt(9.0));      // 3
+    print(sqrt(2.0));      // 1.4142135623731
+    print(abs(-42));       // 42
+    print(abs(42));        // 42
+    print(abs(-2.5));      // 2.5
+    print(min(3, 7));      // 3
+    print(max(3, 7));      // 7
+    print(min(2.5, 1.5));  // 1.5
+    print(max(2.5, 1.5));  // 2.5
+
+    // int and float never mix: convert first
+    var side = 3.0;
+    var diag = sqrt(side * side + side * side);
+    print(diag);           // 4.24264068711928
+    print(min(abs(-7), max(1, 2)));  // 2
+    return 0;
+}

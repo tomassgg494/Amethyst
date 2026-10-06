@@ -1,0 +1,11 @@
+fn min(a: int, b: int) -> int {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn main() -> int {
+    print(min(1, 2));
+    return 0;
+}

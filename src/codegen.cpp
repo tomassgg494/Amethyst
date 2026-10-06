@@ -958,6 +958,53 @@ void Codegen::emitCall(const Expr& expr) {
         out_ += "    cvttsd2si %xmm0, %rax\n";
         return;
     }
+    if (expr.name == "sqrt") {  // float → float, correctly rounded
+        emitExpr(*expr.args[0]);
+        out_ += "    movq %rax, %xmm0\n";
+        out_ += "    sqrtsd %xmm0, %xmm0\n";
+        out_ += "    movq %xmm0, %rax\n";
+        return;
+    }
+    if (expr.name == "abs") {
+        emitExpr(*expr.args[0]);
+        if (expr.args[0]->type == Type::Float) {
+            out_ += "    movq %rax, %xmm0\n";
+            out_ += "    movabsq $0x7fffffffffffffff, %rax\n";  // sign mask
+            out_ += "    movq %rax, %xmm1\n";
+            out_ += "    andpd %xmm1, %xmm0\n";
+            out_ += "    movq %xmm0, %rax\n";
+        } else {
+            std::string absL = newLabel("abs_done");
+            out_ += "    testq %rax, %rax\n";
+            out_ += "    jns " + absL + "\n";
+            out_ += "    negq %rax\n";  // abs(INT64_MIN) wraps to itself
+            out_ += "    " + absL + ":\n";
+        }
+        return;
+    }
+    if (expr.name == "min" || expr.name == "max") {
+        emitExpr(*expr.args[0]);
+        out_ += "    pushq %rax\n";
+        stackDepth_++;
+        emitExpr(*expr.args[1]);
+        out_ += "    movq %rax, %rcx\n";  // rhs
+        out_ += "    popq %rax\n";        // lhs
+        stackDepth_--;
+        if (expr.args[0]->type == Type::Float) {
+            out_ += "    movq %rax, %xmm0\n";
+            out_ += "    movq %rcx, %xmm1\n";
+            out_ += std::string("    ") +
+                    (expr.name == "min" ? "minsd %xmm1, %xmm0\n"
+                                        : "maxsd %xmm1, %xmm0\n");
+            out_ += "    movq %xmm0, %rax\n";
+        } else {
+            // a in %rax, b in %rcx: take b only when it is the wanted one
+            out_ += std::string("    cmpq %rcx, %rax\n    ") +
+                    (expr.name == "min" ? "cmovg %rcx, %rax\n"   // a > b → b
+                                        : "cmovl %rcx, %rax\n"); // a < b → b
+        }
+        return;
+    }
 
     size_t n = expr.args.size();
     std::vector<size_t> units(n, 1);

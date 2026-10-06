@@ -12,6 +12,17 @@ static bool acceptsNull(const Type& target, const Type& value) {
     return target.kind == Type::Kind::Struct && value == Type::Null;
 }
 
+// Names handled by the compiler before user functions are looked up, so a
+// program may not redefine them (the definition would be dead code).
+static bool isBuiltinName(const std::string& name) {
+    static const char* names[] = {"len", "int",   "float", "sqrt",
+                                  "abs", "min",   "max"};
+    for (const char* n : names) {
+        if (name == n) return true;
+    }
+    return false;
+}
+
 // Levenshtein distance, used for "did you mean" suggestions.
 static int editDistance(const std::string& a, const std::string& b) {
     const size_t n = a.size(), m = b.size();
@@ -126,8 +137,9 @@ void Sema::collectFunctions(Program& program) {
     fnNames_.clear();
     for (size_t i = 0; i < program.functions.size(); ++i) {
         FnDecl& fn = program.functions[i];
-        if (fn.name == "len") {
-            fail("'len' is a builtin and cannot be redefined", fn.line, fn.col);
+        if (isBuiltinName(fn.name)) {
+            fail("'" + fn.name + "' is a builtin and cannot be redefined",
+                 fn.line, fn.col);
         }
         for (const auto& existing : fnNames_) {
             if (existing == fn.name) {
@@ -1016,6 +1028,53 @@ Type Sema::checkCall(Expr& expr) {
                  expr.args[0]->line, expr.args[0]->col);
         }
         return Type::Int;
+    }
+
+    auto expectArgs = [&](size_t n) {
+        if (expr.args.size() != n) {
+            fail("'" + expr.name + "' expects " + std::to_string(n) +
+                     " argument(s), got " + std::to_string(expr.args.size()),
+                 expr.line, expr.col);
+        }
+    };
+
+    // math: sqrt(x) on floats, abs/min/max on ints or floats
+    if (expr.name == "sqrt") {
+        expectArgs(1);
+        Type argType = checkExpr(*expr.args[0]);
+        if (argType != Type::Float) {
+            fail(std::string("'sqrt' expects a float argument, got '") +
+                     tyName(argType) + "'",
+                 expr.args[0]->line, expr.args[0]->col);
+        }
+        return Type::Float;
+    }
+    if (expr.name == "abs") {
+        expectArgs(1);
+        Type argType = checkExpr(*expr.args[0]);
+        if (argType != Type::Int && argType != Type::Float) {
+            fail(std::string("'abs' expects an int or float argument, got '") +
+                     tyName(argType) + "'",
+                 expr.args[0]->line, expr.args[0]->col);
+        }
+        return argType;  // int → int, float → float
+    }
+    if (expr.name == "min" || expr.name == "max") {
+        expectArgs(2);
+        Type a = checkExpr(*expr.args[0]);
+        Type b = checkExpr(*expr.args[1]);
+        if (a != b) {
+            fail("'" + expr.name +
+                     "' expects two values of the same type, got '" +
+                     tyName(a) + "' and '" + tyName(b) + "'",
+                 expr.line, expr.col);
+        }
+        if (a != Type::Int && a != Type::Float) {
+            fail("'" + expr.name + "' expects int or float arguments, got '" +
+                     tyName(a) + "'",
+                 expr.line, expr.col);
+        }
+        return a;
     }
 
     for (size_t i = 0; i < fnNames_.size(); ++i) {

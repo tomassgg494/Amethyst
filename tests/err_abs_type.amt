@@ -1,0 +1,4 @@
+fn main() -> int {
+    print(abs("nope"));
+    return 0;
+}
