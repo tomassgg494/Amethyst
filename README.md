@@ -6,8 +6,8 @@
 - Compiler written in **C++17** (no LLVM).
 - Emits **x86-64 GAS assembly**, assembled with `as`, linked with the system linker (`ld` via `gcc` driver).
 - Static typing: `int` (64-bit), `float` (64-bit IEEE 754), `bool`, `string`,
-  structs, arrays (fixed-size on the stack, heap via `new`), `void` (return
-  type only).
+  structs with methods, arrays (fixed-size on the stack, heap via `new`,
+  growable with `push`/`pop`), `void` (return type only).
 
 **Website & docs:** https://tomassgg494.github.io/Amethyst-site/
 (source: [`tomassgg494/Amethyst-site`](https://github.com/tomassgg494/Amethyst-site))
@@ -147,20 +147,63 @@ fn main() -> int {
 }
 ```
 
+Methods, dynamic arrays and string concatenation:
+
+```amethyst
+struct Point {
+    x: int,
+    y: int
+}
+
+impl Point {
+    fn move(self: Point, dx: int, dy: int) -> void {
+        self.x += dx;
+        self.y += dy;
+    }
+
+    fn length2(self: Point) -> int {
+        return self.x * self.x + self.y * self.y;
+    }
+}
+
+fn main() -> int {
+    var p = new Point { x: 3, y: 4 };
+    p.move(1, 1);
+    print(p.length2());       // 41
+
+    var queue: int[] = [];    // grows as needed (0 → 4 → 8 → ...)
+    push(queue, 10);
+    push(queue, 20);
+    print(len(queue));        // 2
+    print(pop(queue));        // 20
+    print(queue[0]);          // 10
+
+    var msg = "total: " + "42";
+    print(msg);               // total: 42
+    print(abs(min(-3, 7)));   // 3
+
+    free(p);
+    free(queue);
+    return 0;
+}
+```
+
 ### Declarations
 
 | Form | Meaning |
 |------|---------|
 | `fn name(a: int, b: bool) -> int { ... }` | Function (up to 6 register slots — an array parameter uses 2, a struct 1; the rest are passed on the stack) |
 | `struct P { x: int, y: float }` | Struct declaration: comma-separated `name: type` fields. Types may be used before they are declared, so `struct Node { next: Node }` works |
+| `impl P { fn m(self: P, ...) -> T { ... } }` | Methods for a struct, called as `p.m(...)`. Every method starts with `self: P`, which is the receiver; a struct may have several `impl` blocks, all collected before any call is checked |
 | `var x: int = expr;` | Local variable, initialized at the declaration |
 | `var x: int;` | Local variable left unassigned until the first `x = expr` |
 | `var x = expr;` | Type inference from initializer (an initializer is required when the type is omitted) |
 | `var a: int[10] = [1, 2, ...];` | Fixed-size stack array; the element type may be `int`, `bool`, `float`, `string` or a struct |
-| `var a: int[] = new int[n];` | Heap array: `n` is any `int` expression, evaluated once; the block starts zeroed and `a` carries pointer + length |
+| `var a: int[] = new int[n];` | Heap array: `n` is any `int` expression, evaluated once; the block starts zeroed and `a` carries pointer + length + capacity (`n`) |
+| `var a: int[] = [];` | Empty growable array: length and capacity 0, nothing allocated until the first `push` |
 | `fn f(a: int[])` | Array parameter: `int[]` / `float[]` / `Point[]`, passed as pointer + length |
 | `fn f(a: string)` | String parameter: pointer to NUL-terminated text |
-| `var s: string = "hi";` | String variable (no concatenation, no indexing) |
+| `var s: string = "hi";` | String variable; `+` concatenates, `+=` appends (no indexing or ordering) |
 | `var x: float = 1.5;` | Floating-point variable (64-bit binary64) |
 | `var p = new P { x: 1, y: 2 };` | Heap object; every field exactly once, in any order. The variable holds a reference (one machine word) |
 | `var p: P = null;` | Struct variable without an object yet; `null` only fits struct types |
@@ -180,6 +223,14 @@ Entry point: `fn main() -> int` (no parameters).
 | `len(a)` | number of elements of an array, or byte length of a string; result is a plain `int`, so `for i in 0..len(a)` works |
 | `float(n)` | `int` → `float` (widening) |
 | `int(x)` | `float` → `int`, truncating toward zero |
+| `push(a, v)` | append `v` to a **local** dynamic array, growing the block when it is full (capacity 0 → 4 → 8 → ...). Not allowed on a fixed array or on a slice parameter — that memory belongs to the caller |
+| `pop(a)` | remove and return the last element of a local dynamic array; popping an empty array fails at runtime |
+| `sqrt(x)` | square root of a `float`, correctly rounded; result is a `float` |
+| `abs(x)` | absolute value of an `int` or a `float`, keeping the type |
+| `min(a, b)` / `max(a, b)` | smaller / larger of two values of the **same** type (`int` or `float`); mixing the two is an error, write `float(n)` first |
+
+All builtin names (`len`, `int`, `float`, `push`, `pop`, `sqrt`, `abs`,
+`min`, `max`) are reserved: a function may not redefine them.
 
 ### Types
 
@@ -192,10 +243,12 @@ Entry point: `fn main() -> int` (no parameters).
 - `T[N]` — fixed-size stack array of N elements (T is `int`, `bool`,
   `float`, `string` or a struct); bounds-checked at runtime. Nothing to
   free: only the elements that are themselves heap objects need `free`.
-- `T[]` — slice type: pointer + length. As a parameter it aliases the
-  caller's array, so the callee can write through it and `len()` works on
-  it; as a local it is written `var a: T[] = new T[n];` and holds a heap
-  block of `n` zeroed elements.
+- `T[]` — slice type: pointer + length (a local also carries its
+  capacity). As a parameter it aliases the caller's array, so the callee
+  can write through it and `len()` works on it; as a local it is written
+  `var a: T[] = new T[n];` (heap block of `n` zeroed elements) or
+  `var a: T[] = [];` (empty, filled with `push`, which grows the block
+  automatically). `push`/`pop` only accept a local, never a parameter.
 - `P` (a struct name) — a reference to a heap object with the fields of
   `struct P`. Assigning or passing one copies the reference, so two
   variables can name the same object; there is no value-copy and no
@@ -203,8 +256,11 @@ Entry point: `fn main() -> int` (no parameters).
 - `null` — the reference to no object; it fits in struct-typed slots and
   nowhere else. Reading a field of `null` fails at runtime.
 - `string` — NUL-terminated text in `.rodata`; store it in variables, assign,
-  compare with `==` / `!=` (compares contents, not pointers), pass it to and
-  return it from functions. There is no concatenation, indexing or ordering.
+  concatenate with `+` and `+=`, compare with `==` / `!=` (compares contents,
+  not pointers), pass it to and return it from functions. There is no
+  indexing or ordering, and no conversion from numbers — join literals and
+  other strings only. Every `+` allocates a new string that stays alive
+  until the program exits (there is no collector yet).
 - `void` — only as a function return type
 
 No implicit conversions: `int`, `bool`, `float` and `string` never mix on
@@ -221,7 +277,8 @@ they become dangling and must not be used again.
 (`+=` `-=` `*=` `/=` `%=`), array element assignment, struct field
 assignment, `if` / `else if` / `else`, `while`, `for i in a..b` (half-open
 range), `break`, `continue`, `return`, `print`, `free`, nested `{ }`
-blocks, expression statements.
+blocks, expression statements (`push(a, v);` is one of them, as are any
+function or method call).
 
 Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 `break` / `continue` only inside a loop.
@@ -235,12 +292,14 @@ Conditions of `if` / `while` must be `bool` (no truthiness on integers).
 5. `+` `-`
 6. `*` `/` `%`
 7. unary `-` `!`
-8. literals, `ident`, `a[i]`, `p.x`, `call(...)`, `[...]`,
+8. literals, `ident`, `a[i]`, `p.x`, `call(...)`, `p.method(...)`, `[...]`,
    `new P { ... }`, `new T[n]`, `( ... )`
 
 `==` / `!=` work on `int`, `bool`, `float` and `string`, and on any struct
 against `null` (two structs are not comparable); `<` `<=` `>` `>=` and
-`+` `-` `*` `/` work on two `int`s or two `float`s (never mixed).
+`+` `-` `*` `/` work on two `int`s or two `float`s (never mixed). The one
+exception is `+` on two strings, which concatenates — and only that:
+`"a" + 1` is an error, as is `"a" - "b"`.
 
 ### Comments
 
@@ -259,6 +318,9 @@ against `null` (two structs are not comparable); `<` `<=` `>` `>=` and
 - Locals live in the stack frame (`-8(%rbp)`, `-16(%rbp)`, …). Structs and
   `new` arrays live on the heap: `malloc` for `new P { ... }`, `calloc(n, 8)`
   for `new T[n]` (so new elements are zero), `free` for `free(...)`.
+- A method compiles exactly like a function whose first parameter is the
+  receiver, under the reserved symbol `__amethyst_m_<Struct>_<method>`; the
+  call site passes `p` as argument 0.
 - Register args: `rdi rsi rdx rcx r8 r9` (an array parameter occupies two of
   them) and `xmm0`-`xmm7` for `float`s; further args on the stack (copied into
   the frame on entry). A struct is one machine word, so it uses one integer
@@ -295,10 +357,24 @@ Reading a field of `null` prints
 a failed allocation prints `Amethyst runtime error: out of memory` and
 exits 1.
 
-## Roadmap (not in v1.2)
+`pop(a)` on an empty array prints
+`Amethyst runtime error: pop from an empty array` and exits 1.
 
-Address-of / dereference (`&`, `*`), value structs, methods, modules, a
-tracing garbage collector, optimizations.
+## Editor support
+
+A VS Code extension lives in [`vscode-amethyst/`](vscode-amethyst/):
+syntax highlighting for `.amt`, comments and indentation rules, snippets
+for the common declarations, and *Compile* / *Compile and Run* commands
+that shell out to `amethystc`. Install it with
+`cd vscode-amethyst && npm run package && code --install-extension amethyst-0.1.0.vsix`,
+press `F5` in that folder for a development host, or copy the folder into
+`~/.vscode/extensions/`.
+
+## Roadmap (not in v1.3)
+
+Address-of / dereference (`&`, `*`), value structs, modules, string
+indexing and conversion between numbers and strings, a tracing garbage
+collector, optimizations.
 
 ## Project layout
 
