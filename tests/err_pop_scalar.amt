@@ -1,0 +1,5 @@
+fn main() -> int {
+    var n = 1;
+    print(pop(n));
+    return 0;
+}

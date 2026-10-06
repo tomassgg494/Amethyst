@@ -227,6 +227,27 @@ amethyst!
 1" "$out"
 check "concat exit" "0" "$rc"
 
+# dynamic arrays: [] + push/pop with automatic growth
+$BIN -o build/dynarray examples/dynarray.amt
+set +e
+out=$(./build/dynarray)
+rc=$?
+set -e
+check "dynarray output" "0
+3
+10
+30
+30
+2
+10
+81
+16
+beta
+1
+3
+7" "$out"
+check "dynarray exit" "0" "$rc"
+
 # definite assignment: nested branches, shadowing, early return
 $BIN -o build/definite examples/definite.amt
 set +e
@@ -606,6 +627,28 @@ else
   echo "        err: $err"
 fi
 
+# pop() from an empty dynamic array → exit 1 + message
+cat > build/popempty.amt <<'EOF'
+fn main() -> int {
+    var a: int[] = [];
+    print(pop(a));
+    return 0;
+}
+EOF
+$BIN -o build/popempty build/popempty.amt
+set +e
+err=$(./build/popempty 2>&1)
+rc=$?
+set -e
+if [[ $rc -eq 1 && "$err" == *"pop from an empty array"* ]]; then
+  PASS=$((PASS + 1))
+  echo "  PASS  runtime pop from empty array"
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL  runtime pop from empty array (rc=$rc)"
+  echo "        err: $err"
+fi
+
 echo "== error cases =="
 
 expect_fail() {
@@ -689,6 +732,12 @@ expect_fail "builtin redefinition" tests/err_builtin_redef.amt "'min' is a built
 expect_fail "sqrt arity" tests/err_sqrt_args.amt "'sqrt' expects 1 argument(s), got 2"
 expect_fail "string += int" tests/err_concats_eq.amt "'+=' expects a string on both sides"
 expect_fail "string -=" tests/err_string_subeq.amt "'-=' cannot be applied to strings"
+expect_fail "push into fixed array" tests/err_push_fixed.amt "'push' expects a dynamic array, got fixed-size 'int[3]'"
+expect_fail "push into a parameter" tests/err_push_param.amt "'push' cannot modify a slice parameter"
+expect_fail "push of the wrong type" tests/err_push_type.amt "cannot push 'string' into 'int[]'"
+expect_fail "push arity" tests/err_push_arity.amt "'push' expects 2 argument(s), got 1"
+expect_fail "pop of a scalar" tests/err_pop_scalar.amt "'pop' expects an array as its first argument"
+expect_fail "empty literal type inference" tests/err_empty_infer.amt "cannot infer the element type of an empty array literal"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

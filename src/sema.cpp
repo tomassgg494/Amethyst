@@ -15,8 +15,9 @@ static bool acceptsNull(const Type& target, const Type& value) {
 // Names handled by the compiler before user functions are looked up, so a
 // program may not redefine them (the definition would be dead code).
 static bool isBuiltinName(const std::string& name) {
-    static const char* names[] = {"len", "int",   "float", "sqrt",
-                                  "abs", "min",   "max"};
+    static const char* names[] = {"len",  "int",  "float", "sqrt",
+                                  "abs",  "min",  "max",   "push",
+                                  "pop"};
     for (const char* n : names) {
         if (name == n) return true;
     }
@@ -291,6 +292,40 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
                 declare(stmt.name, info, stmt.line, stmt.col);
                 break;
             }
+
+            // `var a: int[] = [];` — the empty literal is how a growable
+            // array starts: it carries no element type, so the type has to
+            // be written down, and push() allocates the block on first use
+            if (stmt.expr->kind == ExprKind::ArrayLit && stmt.expr->args.empty()) {
+                if (stmt.typeInferred) {
+                    fail("cannot infer the element type of an empty array "
+                         "literal (declare it: 'var a: int[] = [];')",
+                         stmt.line, stmt.col);
+                }
+                if (!isArrayType(stmt.declaredType)) {
+                    fail("the empty array literal '[]' needs a slice type "
+                         "(e.g. 'var a: int[] = [];')",
+                         stmt.line, stmt.col);
+                }
+                if (stmt.declaredSize > 0) {
+                    fail("the empty array literal '[]' cannot initialize the "
+                         "fixed-size '" +
+                             fixedArrayName(stmt.declaredType.element(),
+                                            stmt.declaredSize) +
+                             " " + stmt.name + "'",
+                         stmt.line, stmt.col);
+                }
+                stmt.declaredSize = -1;  // runtime length
+                stmt.expr->type = stmt.declaredType;
+                VarInfo info{stmt.declaredType, nextSlot_, -1};
+                info.assigned = true;
+                info.heapArray = true;  // push allocates; free(null) is a no-op
+                nextSlot_ += 3;         // {pointer, length, capacity}
+                stmt.slot = info.slot;
+                declare(stmt.name, info, stmt.line, stmt.col);
+                break;
+            }
+
             Type initType = checkExpr(*stmt.expr);
             // `new T[n]` yields a slice; an array literal yields a fixed array
             bool fromNew =
@@ -364,12 +399,13 @@ void Sema::checkStmt(Stmt& stmt, Type fnReturn) {
             VarInfo info{stmt.declaredType, -1, 0};
             info.assigned = true;
             if (isArrayType(stmt.declaredType)) {
-                // a slice (fixed size ≤ 0) is {pointer, length}: two slots
+                // a slice (fixed size ≤ 0) is {pointer, length, capacity}:
+                // three slots; a fixed array is one slot per element
                 bool slice = stmt.declaredSize <= 0;
                 info.slot = nextSlot_;
                 info.arraySize = slice ? -1 : stmt.declaredSize;
                 info.heapArray = fromNew;
-                nextSlot_ += slice ? 2 : stmt.declaredSize;
+                nextSlot_ += slice ? 3 : stmt.declaredSize;
             } else {
                 info.slot = nextSlot_++;
             }
@@ -1013,6 +1049,52 @@ Type Sema::checkCall(Expr& expr) {
     if (expr.name == "print") {
         fail("print is a statement, not a function; use print(expr);",
              expr.line, expr.col);
+    }
+
+    // push(a, v) / pop(a): only on a local dynamic array, never on a fixed
+    // array or a slice parameter (that memory belongs to the caller)
+    if (expr.name == "push" || expr.name == "pop") {
+        const bool isPush = expr.name == "push";
+        const size_t want = isPush ? 2u : 1u;
+        if (expr.args.size() != want) {
+            fail("'" + expr.name + "' expects " + std::to_string(want) +
+                     " argument(s), got " + std::to_string(expr.args.size()),
+                 expr.line, expr.col);
+        }
+        Expr& arr = *expr.args[0];
+        Type arrType = checkExpr(arr);
+        if (!isArrayType(arrType)) {
+            fail("'" + expr.name +
+                     "' expects an array as its first argument, got '" +
+                     tyName(arrType) + "'",
+                 arr.line, arr.col);
+        }
+        if (arr.kind != ExprKind::Ident) {
+            fail("'" + expr.name +
+                     "' expects a variable as its first argument (an array "
+                     "returned by a call cannot be resized)",
+                 arr.line, arr.col);
+        }
+        if (arr.arraySize >= 0) {
+            fail("'" + expr.name + "' expects a dynamic array, got fixed-size '" +
+                     fixedArrayName(arrType.element(), arr.arraySize) + "'",
+                 arr.line, arr.col);
+        }
+        VarInfo* v = lookup(arr.name);
+        if (v == nullptr || v->isParam) {
+            fail("'" + expr.name + "' cannot modify a slice parameter ('" +
+                     arr.name + "' belongs to the caller)",
+                 arr.line, arr.col);
+        }
+        Type elem = arrType.element();
+        if (!isPush) return elem;  // pop yields the element type
+        Type valType = checkExpr(*expr.args[1]);
+        if (valType != elem) {
+            fail(std::string("cannot push '") + tyName(valType) + "' into '" +
+                     tyName(arrType) + "'",
+                 expr.args[1]->line, expr.args[1]->col);
+        }
+        return Type::Void;
     }
 
     if (expr.name == "len") {

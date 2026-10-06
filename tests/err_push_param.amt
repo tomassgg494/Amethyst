@@ -1,0 +1,9 @@
+fn sum(a: int[]) -> int {
+    push(a, 7);
+    return len(a);
+}
+
+fn main() -> int {
+    var v: int[] = new int[1];
+    return sum(v);
+}

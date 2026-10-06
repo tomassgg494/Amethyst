@@ -47,6 +47,8 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    .string \"Amethyst runtime error: out of memory\\n\"\n";
     out_ += ".fmt_size:\n";
     out_ += "    .string \"Amethyst runtime error: array size must be positive (got %ld)\\n\"\n";
+    out_ += ".fmt_pop:\n";
+    out_ += "    .string \"Amethyst runtime error: pop from an empty array\\n\"\n";
     out_ += ".text\n";
 
     // shared bounds-failure handler (never returns)
@@ -155,6 +157,121 @@ std::string Codegen::emit(const Program& program) {
     out_ += "    call __amethyst_oom_fail@PLT\n";  // never returns
     out_ += "    ud2\n";
     out_ += ".size __amethyst_str_concat, .-__amethyst_str_concat\n";
+
+    // pop() from an empty array (never returns)
+    out_ += ".globl __amethyst_pop_fail\n";
+    out_ += ".type __amethyst_pop_fail, @function\n";
+    out_ += "__amethyst_pop_fail:\n";
+    out_ += "    subq $8, %rsp\n";            // entry rsp ≡ 8 (mod 16) → align
+    out_ += "    leaq .fmt_pop(%rip), %rdi\n";
+    out_ += "    xorl %eax, %eax\n";
+    out_ += "    call printf@PLT\n";
+    out_ += "    movl $1, %edi\n";
+    out_ += "    call exit@PLT\n";
+    out_ += ".size __amethyst_pop_fail, .-__amethyst_pop_fail\n";
+
+    // push(value) on a dynamic array: entry %rdi = &{ptr, len, cap}
+    // grows the block when it is full (capacity 0 → 4, then it doubles)
+    out_ += ".globl __amethyst_array_push\n";
+    out_ += ".type __amethyst_array_push, @function\n";
+    out_ += "__amethyst_array_push:\n";
+    out_ += "    pushq %rbp\n";               // entry rsp ≡ 8 → now ≡ 0
+    out_ += "    movq %rsp, %rbp\n";
+    out_ += "    subq $64, %rsp\n";           // stays 16-aligned for the calls
+    out_ += "    movq %rdi, -8(%rbp)\n";      // &var
+    out_ += "    movq %rsi, -16(%rbp)\n";     // value
+    out_ += "    movq (%rdi), %rax\n";
+    out_ += "    movq %rax, -24(%rbp)\n";     // old base
+    out_ += "    movq -16(%rdi), %rax\n";
+    out_ += "    movq %rax, -64(%rbp)\n";     // old capacity
+    out_ += "    movq -8(%rdi), %rcx\n";
+    out_ += "    movq %rcx, -32(%rbp)\n";     // length
+    out_ += "    cmpq -16(%rdi), %rcx\n";     // length vs capacity
+    out_ += "    jl __amethyst_push_room\n";  // there is room for one more
+
+    // full → new block of max(4, 2 * capacity) elements
+    out_ += "    movq -64(%rbp), %rax\n";
+    out_ += "    leaq (%rax,%rax), %rdx\n";   // 2 * capacity
+    out_ += "    cmpq $4, %rdx\n";
+    out_ += "    jge __amethyst_push_cap\n";
+    out_ += "    movq $4, %rdx\n";
+    out_ += "__amethyst_push_cap:\n";
+    out_ += "    movq %rdx, -40(%rbp)\n";     // new capacity
+    out_ += "    movq %rdx, %rdi\n";
+    out_ += "    movq $8, %rsi\n";
+    out_ += "    call calloc@PLT\n";
+    out_ += "    testq %rax, %rax\n";
+    out_ += "    jne __amethyst_push_got\n";
+    out_ += "    call __amethyst_oom_fail@PLT\n";  // never returns
+    out_ += "    ud2\n";
+    out_ += "__amethyst_push_got:\n";
+    out_ += "    movq -40(%rbp), %rcx\n";     // new capacity
+    out_ += "    decq %rcx\n";
+    out_ += "    shlq $3, %rcx\n";
+    out_ += "    addq %rcx, %rax\n";          // new base = raw + 8*(cap-1)
+    out_ += "    movq %rax, -56(%rbp)\n";     // new base
+    // copy the live part: 8*length bytes ending at the old base
+    out_ += "    movq -32(%rbp), %rcx\n";     // length
+    out_ += "    testq %rcx, %rcx\n";
+    out_ += "    je __amethyst_push_nocopy\n";
+    out_ += "    decq %rcx\n";
+    out_ += "    shlq $3, %rcx\n";            // 8 * (length - 1)
+    out_ += "    movq -24(%rbp), %rsi\n";
+    out_ += "    subq %rcx, %rsi\n";          // src = old base - 8*(len-1)
+    out_ += "    movq -56(%rbp), %rdi\n";
+    out_ += "    subq %rcx, %rdi\n";          // dst = new base - 8*(len-1)
+    out_ += "    movq -32(%rbp), %rdx\n";
+    out_ += "    shlq $3, %rdx\n";            // 8 * length
+    out_ += "    call memcpy@PLT\n";
+    out_ += "__amethyst_push_nocopy:\n";
+    // release the old block (nothing to free when it was never allocated)
+    out_ += "    movq -24(%rbp), %rdi\n";     // old base
+    out_ += "    testq %rdi, %rdi\n";
+    out_ += "    je __amethyst_push_keep\n";
+    out_ += "    movq -64(%rbp), %rcx\n";     // old capacity
+    out_ += "    decq %rcx\n";
+    out_ += "    shlq $3, %rcx\n";
+    out_ += "    subq %rcx, %rdi\n";          // raw = old base - 8*(cap-1)
+    out_ += "    call free@PLT\n";
+    out_ += "__amethyst_push_keep:\n";
+    out_ += "    movq -8(%rbp), %rax\n";      // &var
+    out_ += "    movq -56(%rbp), %rcx\n";
+    out_ += "    movq %rcx, (%rax)\n";        // base
+    out_ += "    movq -40(%rbp), %rcx\n";
+    out_ += "    movq %rcx, -16(%rax)\n";     // capacity
+    out_ += "__amethyst_push_room:\n";
+    out_ += "    movq -8(%rbp), %rcx\n";      // &var
+    out_ += "    movq (%rcx), %rax\n";        // base
+    out_ += "    movq -8(%rcx), %rdx\n";      // length
+    out_ += "    shlq $3, %rdx\n";
+    out_ += "    subq %rdx, %rax\n";          // element `length` lives here
+    out_ += "    movq -16(%rbp), %rdx\n";     // value
+    out_ += "    movq %rdx, (%rax)\n";
+    out_ += "    incq -8(%rcx)\n";            // length + 1
+    out_ += "    leave\n";
+    out_ += "    ret\n";
+    out_ += ".size __amethyst_array_push, .-__amethyst_array_push\n";
+
+    // pop() → returns the last element; entry %rdi = &{ptr, len, cap}
+    out_ += ".globl __amethyst_array_pop\n";
+    out_ += ".type __amethyst_array_pop, @function\n";
+    out_ += "__amethyst_array_pop:\n";
+    out_ += "    pushq %rbp\n";
+    out_ += "    movq %rsp, %rbp\n";
+    out_ += "    movq -8(%rdi), %rax\n";      // length
+    out_ += "    testq %rax, %rax\n";
+    out_ += "    jg __amethyst_pop_ok\n";
+    out_ += "    call __amethyst_pop_fail@PLT\n";  // never returns
+    out_ += "__amethyst_pop_ok:\n";
+    out_ += "    movq (%rdi), %rcx\n";        // base
+    out_ += "    decq %rax\n";
+    out_ += "    movq %rax, -8(%rdi)\n";      // length - 1
+    out_ += "    shlq $3, %rax\n";
+    out_ += "    subq %rax, %rcx\n";          // element (length-1)
+    out_ += "    movq (%rcx), %rax\n";
+    out_ += "    leave\n";
+    out_ += "    ret\n";
+    out_ += ".size __amethyst_array_pop, .-__amethyst_array_pop\n";
 
     for (const auto& fn : program.functions) {
         emitFunction(fn, program);
@@ -369,6 +486,8 @@ void Codegen::emitNewArray(const Expr& expr, int slot) {
     stackDepth_--;
     out_ += "    movq %rax, " +
             std::to_string(slotOffset(slot + 1)) + "(%rbp)\n";  // length
+    out_ += "    movq %rax, " +
+            std::to_string(slotOffset(slot + 2)) + "(%rbp)\n";  // capacity
     out_ += "    shlq $3, %rax\n";
     out_ += "    addq %rax, %r11\n";
     out_ += "    subq $8, %r11\n";  // base = raw + 8*(count - 1)
@@ -484,8 +603,20 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
         case StmtKind::VarDecl: {
             if (isArrayType(stmt.declaredType)) {
                 if (stmt.expr->kind == ExprKind::New) {
-                    // heap array: {pointer, length} in two slots
+                    // heap array: {pointer, length, capacity}
                     emitNewArray(*stmt.expr, stmt.slot);
+                } else if (stmt.expr->kind == ExprKind::ArrayLit &&
+                           stmt.expr->args.empty()) {
+                    // `var a: int[] = [];` — nothing allocated yet; push()
+                    // takes care of that on the first element
+                    out_ += "    movq $0, " +
+                            std::to_string(slotOffset(stmt.slot)) + "(%rbp)\n";
+                    out_ += "    movq $0, " +
+                            std::to_string(slotOffset(stmt.slot + 1)) +
+                            "(%rbp)\n";
+                    out_ += "    movq $0, " +
+                            std::to_string(slotOffset(stmt.slot + 2)) +
+                            "(%rbp)\n";
                 } else {
                     // store each element into consecutive slots
                     for (size_t i = 0; i < stmt.expr->args.size(); ++i) {
@@ -552,13 +683,13 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
             stackDepth_++;
 
             if (stmt.target->type.kind == Type::Kind::Array) {
-                // the block starts below the base: raw = base - 8*(len-1);
+                // the block starts below the base: raw = base - 8*(cap-1);
                 // a null pointer (already freed) is a no-op
                 std::string skipL = newLabel("free_skip");
                 out_ += "    movq (%rax), %rdi\n";
                 out_ += "    testq %rdi, %rdi\n";
                 out_ += "    je " + skipL + "\n";
-                out_ += "    movq -8(%rax), %rcx\n";  // length
+                out_ += "    movq -16(%rax), %rcx\n";  // capacity
                 out_ += "    shlq $3, %rcx\n";
                 out_ += "    subq %rcx, %rdi\n";
                 out_ += "    addq $8, %rdi\n";  // raw block
@@ -566,8 +697,9 @@ void Codegen::emitStmt(const Stmt& stmt, const Program& program) {
                 out_ += skipL + ":\n";
                 out_ += "    popq %rax\n";
                 stackDepth_--;
-                out_ += "    movq $0, (%rax)\n";    // pointer = null
-                out_ += "    movq $0, -8(%rax)\n";  // length = 0
+                out_ += "    movq $0, (%rax)\n";     // pointer = null
+                out_ += "    movq $0, -8(%rax)\n";   // length = 0
+                out_ += "    movq $0, -16(%rax)\n";  // capacity = 0
                 break;
             }
 
@@ -998,6 +1130,24 @@ void Codegen::emitCall(const Expr& expr) {
         } else {
             emitArrayLength(*expr.args[0]);
         }
+        return;
+    }
+    if (expr.name == "push") {
+        emitExpr(*expr.args[1]);  // value → %rax
+        out_ += "    pushq %rax\n";
+        stackDepth_++;
+        emitAddr(*expr.args[0]);  // %rax = &{ptr, len, cap}
+        out_ += "    movq %rax, %rdi\n";
+        out_ += "    popq %rax\n";
+        stackDepth_--;
+        out_ += "    movq %rax, %rsi\n";
+        emitAlignedCall("__amethyst_array_push");
+        return;
+    }
+    if (expr.name == "pop") {
+        emitAddr(*expr.args[0]);  // %rax = &{ptr, len, cap}
+        out_ += "    movq %rax, %rdi\n";
+        emitAlignedCall("__amethyst_array_pop");
         return;
     }
     if (expr.name == "float") {  // int → float

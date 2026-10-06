@@ -1,0 +1,46 @@
+// dynamic arrays: an empty [] start, push, pop and automatic growth
+// the capacity doubles when the block fills up (0 -> 4 -> 8 -> ...)
+
+fn main() -> int {
+    var a: int[] = [];
+    print(len(a));              // 0
+
+    push(a, 10);
+    push(a, 20);
+    push(a, 30);
+    print(len(a));              // 3
+    print(a[0]);                // 10
+    print(a[2]);                // 30
+    print(pop(a));              // 30
+    print(len(a));              // 2
+
+    // push past the initial capacity to exercise growth and the copy
+    var squares: int[] = [];
+    var i = 0;
+    while i < 10 {
+        push(squares, i * i);
+        i = i + 1;
+    }
+    print(len(squares));        // 10
+    print(squares[9]);          // 81
+    print(squares[4]);          // 16
+
+    // push/pop keep the element type
+    var names: string[] = [];
+    push(names, "alpha");
+    push(names, "beta");
+    print(pop(names));          // beta
+    print(len(names));          // 1
+
+    // arrays from new are growable as well
+    var c: int[] = new int[2];
+    push(c, 7);
+    print(len(c));              // 3
+    print(c[2]);                // 7
+
+    free(a);
+    free(squares);
+    free(names);
+    free(c);
+    return 0;
+}

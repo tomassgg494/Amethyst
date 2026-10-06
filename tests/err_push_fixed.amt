@@ -1,0 +1,5 @@
+fn main() -> int {
+    var a: int[3] = [1, 2, 3];
+    push(a, 4);
+    return 0;
+}

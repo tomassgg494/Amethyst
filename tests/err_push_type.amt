@@ -1,0 +1,5 @@
+fn main() -> int {
+    var a: int[] = [];
+    push(a, "nope");
+    return 0;
+}

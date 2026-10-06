@@ -555,9 +555,8 @@ ExprPtr Parser::parsePrimary() {
             } while (match(TokenType::Comma));
         }
         expect(TokenType::RBracket, "']' after array literal");
-        if (elems.empty()) {
-            failAt(tok, "array literal must not be empty");
-        }
+        // `[]` is allowed here: sema only accepts it as the initializer of a
+        // slice variable ("var a: int[] = [];"), where push() fills it later
         return Expr::makeArrayLit(std::move(elems), tok.line, tok.col);
     }
     if (check(TokenType::LParen)) {
