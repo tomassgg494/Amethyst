@@ -45,13 +45,13 @@ make && sudo make deb
 ```sh
 cd vscode-amethyst
 npm run package          # npx @vscode/vsce package --no-dependencies
-code --install-extension amethyst-0.1.0.vsix
+code --install-extension amethyst-1.3.0.vsix
 ```
 
 **By hand**
 
-Copy this folder into your extensions directory as `amethyst-0.1.0`, for
-example `~/.vscode/extensions/amethyst-0.1.0` on Linux, and restart VS Code.
+Copy this folder into your extensions directory as `amethyst-1.3.0`, for
+example `~/.vscode/extensions/amethyst-1.3.0` on Linux, and restart VS Code.
 
 ## License
 

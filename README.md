@@ -28,9 +28,9 @@ Beginners do **not** need to compile the compiler. The Dev Kit ships a ready bin
 
 ```sh
 make deb
-# → dist/amethyst-devkit_1.2.0_amd64.deb
+# → dist/amethyst-devkit_1.3.0_amd64.deb
 
-sudo apt install ./dist/amethyst-devkit_1.2.0_amd64.deb
+sudo apt install ./dist/amethyst-devkit_1.3.0_amd64.deb
 ```
 
 Installed layout:
@@ -41,6 +41,7 @@ Installed layout:
 | `/usr/bin/amethyst-new` | creates a starter `.amt` from a template |
 | `/usr/share/amethyst/examples/` | sample programs |
 | `/usr/share/amethyst/templates/` | `hello.amt`, `fib.amt` |
+| `/usr/share/amethyst/vscode/` | VS Code extension (highlighting, snippets, Compile/Run) |
 | `/usr/share/doc/amethyst/README.md` | language reference |
 | `man amethystc` / `man amethyst-new` | manual pages |
 
@@ -365,10 +366,17 @@ exits 1.
 A VS Code extension lives in [`vscode-amethyst/`](vscode-amethyst/):
 syntax highlighting for `.amt`, comments and indentation rules, snippets
 for the common declarations, and *Compile* / *Compile and Run* commands
-that shell out to `amethystc`. Install it with
-`cd vscode-amethyst && npm run package && code --install-extension amethyst-0.1.0.vsix`,
-press `F5` in that folder for a development host, or copy the folder into
-`~/.vscode/extensions/`.
+that shell out to `amethystc`. The Dev Kit installs its sources in
+`/usr/share/amethyst/vscode/`, and every release attaches a ready-to-install
+`amethyst-1.3.0.vsix` as a separate asset:
+
+```sh
+code --install-extension amethyst-1.3.0.vsix
+```
+
+Build your own with `cd vscode-amethyst && npm run package`, press `F5` in
+that folder for a development host, or copy the folder into
+`~/.vscode/extensions/amethyst-1.3.0`.
 
 ## Roadmap (not in v1.3)
 

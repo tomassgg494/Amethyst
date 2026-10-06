@@ -1,6 +1,6 @@
 # Change Log
 
-## 0.1.0
+## 1.3.0
 
 - Language definition for `.amt` files: TextMate grammar, line comments,
   brackets and indentation rules

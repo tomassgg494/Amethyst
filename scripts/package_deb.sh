@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 PKG_NAME="amethyst"
-PKG_VERSION="${AMETHYST_VERSION:-1.2.0}"
+PKG_VERSION="${AMETHYST_VERSION:-1.3.0}"
 PKG_ARCH="amd64"
 PKG_MAINTAINER="Amethyst Project <amethyst@localhost>"
 PKG_SECTION="devel"
@@ -48,9 +48,10 @@ BIN_DIR="$STAGE/usr/bin"
 DOC_DIR="$STAGE/usr/share/doc/$PKG_NAME"
 EX_DIR="$STAGE/usr/share/$PKG_NAME/examples"
 TPL_DIR="$STAGE/usr/share/$PKG_NAME/templates"
+VS_DIR="$STAGE/usr/share/$PKG_NAME/vscode"
 MAN_DIR="$STAGE/usr/share/man/man1"
 
-mkdir -p "$BIN_DIR" "$DOC_DIR" "$EX_DIR" "$TPL_DIR" "$MAN_DIR" "$STAGE/DEBIAN"
+mkdir -p "$BIN_DIR" "$DOC_DIR" "$EX_DIR" "$TPL_DIR" "$VS_DIR" "$MAN_DIR" "$STAGE/DEBIAN"
 
 # compiler (strip for size)
 install -m 755 amethystc "$BIN_DIR/amethystc"
@@ -65,6 +66,11 @@ install -m 644 examples/*.amt "$EX_DIR/"
 # templates
 install -m 644 packaging/deb/templates/hello.amt "$TPL_DIR/hello.amt"
 install -m 644 packaging/deb/templates/fib.amt "$TPL_DIR/fib.amt"
+
+# VS Code extension (source folder; the ready .vsix is a separate release asset)
+cp -a vscode-amethyst/. "$VS_DIR/"
+rm -rf "$VS_DIR/.vscode" "$VS_DIR/.vscodeignore"
+find "$VS_DIR" -name '*.vsix' -delete
 
 # docs
 install -m 644 README.md "$DOC_DIR/"
@@ -102,6 +108,10 @@ Description: Amethyst language Dev Kit (compiler + examples + docs)
   - amethystc     ahead-of-time compiler (C++17, x86-64 GAS backend)
   - amethyst-new  creates a ready-to-run starter project
   - examples and templates
+  - vscode-amethyst   VS Code extension (.amt highlighting, snippets,
+                      Compile / Compile and Run) — the ready-to-install
+                      amethyst-1.3.0.vsix is a separate asset of the
+                      GitHub release
   - README, man pages
  .
  The compiler invokes the system assembler (as) and linker (gcc/ld)
@@ -123,7 +133,7 @@ echo "=== Package info ==="
 dpkg-deb --info "$OUT_PATH"
 echo
 echo "=== Contents (top) ==="
-dpkg-deb --contents "$OUT_PATH" | head -40
+dpkg-deb --contents "$OUT_PATH" | sed -n '1,40p'
 echo "..."
 echo
 echo "=== Install with ==="

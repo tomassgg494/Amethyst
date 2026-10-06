@@ -20,6 +20,10 @@ case "$1" in
     ls /usr/share/amethyst/examples
     ls /usr/share/amethyst/templates
 
+  VS Code extension (sources in the package, .vsix in the release):
+    ls /usr/share/amethyst/vscode
+    code --install-extension amethyst-1.3.0.vsix
+
   Docs:
     man amethystc
     less /usr/share/doc/amethyst/README.md

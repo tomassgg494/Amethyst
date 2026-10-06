@@ -1,3 +1,31 @@
+amethyst (1.3.0) unstable; urgency=medium
+
+  * Methods: `impl P { fn m(self: P, ...) -> T { ... } }` declared in
+    impl blocks (several per struct are merged), called as `p.m(...)` with
+    self bound to the receiver; type, arity and argument checks match the
+    ones for plain functions.
+  * String concatenation: `+` joins two strings and `+=` appends, both
+    returning a heap string kept until the program exits (still no
+    collector).
+  * Dynamic arrays grow: `var a: int[] = [];` starts empty, `push(a, v)`
+    doubles the capacity when the block fills (0 -> 4 -> 8 -> ...) and
+    `pop(a)` returns and removes the last element (runtime error on an
+    empty array). push/pop only accept a local array, never a fixed-size
+    one or a slice parameter.
+  * Math builtins: sqrt, abs, min, max. Together with len, int, float,
+    push and pop they are reserved names: a user function can no longer
+    redefine them nor start with `__amethyst_`.
+  * float[] and string[] slice parameters parse again (regression fixed).
+  * New examples: math.amt, concat.amt, dynarray.amt, methods.amt.
+  * VS Code extension (vscode-amethyst/): .amt syntax highlighting,
+    snippets and Compile / Compile and Run commands. Its sources are
+    installed under /usr/share/amethyst/vscode/; the ready-to-install
+    amethyst-1.3.0.vsix ships as a separate asset of the GitHub release.
+  * Documentation website updated for methods, dynamic arrays, string
+    concatenation and the builtin functions.
+
+ -- Amethyst Project <amethyst@localhost>  Tue, 06 Oct 2026 18:00:00 +0000
+
 amethyst (1.2.0) unstable; urgency=medium
 
   * struct type: declarations `struct P { x: int, y: float }` with
