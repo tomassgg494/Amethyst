@@ -50,11 +50,11 @@ Type Parser::parseType(bool allowVoid, bool allowSlice) {
     } else if (match(TokenType::KwBool)) {
         base = Type::Bool;
     } else if (match(TokenType::KwFloat)) {
-        return Type::Float;
+        base = Type::Float;  // no early return: `float[]` is a slice too
     } else if (match(TokenType::KwString)) {
-        return Type::Str;
+        base = Type::Str;
     } else if (allowVoid && match(TokenType::KwVoid)) {
-        return Type::Void;
+        base = Type::Void;
     } else if (check(TokenType::Ident)) {
         const Token& tok = advance();
         auto it = structIds_.find(tok.text);

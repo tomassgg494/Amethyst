@@ -264,6 +264,50 @@ check "methods output" "1
 3" "$out"
 check "methods exit" "0" "$rc"
 
+# slice types other than int/bool/struct work in signatures too
+cat > build/sliceparams.amt <<'EOF'
+fn scaleAll(v: float[]) -> void {
+    var i = 0;
+    while i < len(v) {
+        v[i] = v[i] * 2.0;
+        i = i + 1;
+    }
+}
+
+fn countOf(s: string[]) -> int {
+    return len(s);
+}
+
+fn main() -> int {
+    var v: float[] = new float[2];
+    v[0] = 1.5;
+    v[1] = 2.0;
+    scaleAll(v);
+    print(v[0]);
+    print(v[1]);
+
+    var s: string[] = [];
+    push(s, "a");
+    push(s, "b");
+    print(countOf(s));
+    print(s[1]);
+
+    free(v);
+    free(s);
+    return 0;
+}
+EOF
+$BIN -o build/sliceparams build/sliceparams.amt
+set +e
+out=$(./build/sliceparams)
+rc=$?
+set -e
+check "float[]/string[] parameters" "3
+4
+2
+b" "$out"
+check "sliceparams exit" "0" "$rc"
+
 # definite assignment: nested branches, shadowing, early return
 $BIN -o build/definite examples/definite.amt
 set +e
