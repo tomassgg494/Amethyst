@@ -1,0 +1,110 @@
+{
+  "name": "amethyst",
+  "displayName": "Amethyst",
+  "description": "Syntax highlighting, snippets and compile/run commands for the Amethyst language (.amt)",
+  "version": "0.1.0",
+  "publisher": "amethyst-lang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tomasdias/Amethyst"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "amethyst",
+    "amt",
+    "compiler"
+  ],
+  "activationEvents": [
+    "onLanguage:amethyst",
+    "onCommand:amethyst.compile",
+    "onCommand:amethyst.run"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "amethyst",
+        "aliases": [
+          "Amethyst",
+          "amethyst"
+        ],
+        "extensions": [
+          ".amt"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "amethyst",
+        "scopeName": "source.amethyst",
+        "path": "./syntaxes/amethyst.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "amethyst",
+        "path": "./snippets/amethyst.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "amethyst.compile",
+        "title": "Amethyst: Compile Current File"
+      },
+      {
+        "command": "amethyst.run",
+        "title": "Amethyst: Compile and Run Current File"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "amethyst.compile",
+          "when": "resourceLangId == amethyst",
+          "group": "navigation@1"
+        },
+        {
+          "command": "amethyst.run",
+          "when": "resourceLangId == amethyst",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "amethyst.compile",
+          "when": "resourceLangId == amethyst"
+        },
+        {
+          "command": "amethyst.run",
+          "when": "resourceLangId == amethyst"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Amethyst",
+      "properties": {
+        "amethyst.compilerPath": {
+          "type": "string",
+          "default": "amethystc",
+          "description": "Path to the amethystc compiler. An absolute path is useful when it is not on PATH."
+        },
+        "amethyst.outputDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Directory for the compiled binary. Leave empty to use the system temp directory."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Amethyst",
+  "scopeName": "source.amethyst",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#self" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#builtins" },
+    { "include": "#function-calls" },
+    { "include": "#type-names" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.amethyst",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.amethyst",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.amethyst" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.amethyst" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.amethyst",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.amethyst",
+          "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.amethyst",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.amethyst",
+          "match": "\\b(if|else|while|for|in|return|break|continue)\\b"
+        },
+        {
+          "name": "keyword.declaration.amethyst",
+          "match": "\\b(fn|var|struct|impl)\\b"
+        },
+        {
+          "name": "keyword.other.amethyst",
+          "match": "\\b(new|free|print)\\b"
+        }
+      ]
+    },
+    "self": {
+      "name": "variable.language.self.amethyst",
+      "match": "\\bself\\b"
+    },
+    "types": {
+      "name": "storage.type.amethyst",
+      "match": "\\b(int|bool|float|string|void)\\b"
+    },
+    "constants": {
+      "name": "constant.language.amethyst",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "builtins": {
+      "name": "support.function.builtin.amethyst",
+      "match": "\\b(len|abs|sqrt|min|max|push|pop)\\b"
+    },
+    "function-calls": {
+      "name": "entity.name.function.amethyst",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+    },
+    "type-names": {
+      "name": "entity.name.type.amethyst",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.range.amethyst",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.assignment.amethyst",
+          "match": "(\\+=|-=|\\*=|/=|%=|==|!=|<=|>=|&&|\\|\\|)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.amethyst",
+          "match": "[+\\-*/%=<>!]"
+        },
+        {
+          "name": "keyword.operator.logical.amethyst",
+          "match": "[&|]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.block.amethyst",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.array.amethyst",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.separator.amethyst",
+          "match": "[();,.:]"
+        }
+      ]
+    }
+  }
+}
